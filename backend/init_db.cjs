@@ -113,21 +113,8 @@ async function initDB() {
       total NUMERIC(10, 2) NOT NULL DEFAULT 0
     );
 
-    CREATE TABLE IF NOT EXISTS reviews (
-      id_review SERIAL PRIMARY KEY,
-      user_id INTEGER NOT NULL REFERENCES users(id_user) ON DELETE CASCADE,
-      service_id INTEGER REFERENCES services(id_service) ON DELETE SET NULL,
-      rating INTEGER NOT NULL CHECK (rating >= 1 AND rating <= 5),
-      comment TEXT NOT NULL,
-      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-    );
-
-    CREATE TABLE IF NOT EXISTS password_resets (
-      email VARCHAR(100) PRIMARY KEY,
-      code VARCHAR(6) NOT NULL,
-      expires_at TIMESTAMP NOT NULL
-    );
+    DROP TABLE IF EXISTS reviews CASCADE;
+    DROP TABLE IF EXISTS password_resets CASCADE;
   `);
 
   console.log('Seeding initial data...');
@@ -471,15 +458,6 @@ async function initDB() {
       (1, 2, NOW() - interval '2 days', 3400.00)
     ON CONFLICT (id_payment) DO NOTHING;
     SELECT setval('payments_id_payment_seq', (SELECT COALESCE(MAX(id_payment), 1) FROM payments));
-  `);
-
-  // 10. Sample Reviews
-  await pool.query(`
-    INSERT INTO reviews (id_review, user_id, service_id, rating, comment, created_at) VALUES
-      (1, 2, 1, 5, 'Отличная стрижка! Мастер Анна учла все пожелания и сделала идеальный фейд. Обязательно вернусь снова!', NOW() - interval '1 day'),
-      (2, 2, 4, 5, 'Прекрасный спа-уход и моделирование бороды. Распаривание полотенцем с маслами — это отдельный кайф!', NOW() - interval '3 days')
-    ON CONFLICT (id_review) DO NOTHING;
-    SELECT setval('reviews_id_review_seq', (SELECT COALESCE(MAX(id_review), 1) FROM reviews));
   `);
 
   console.log('Database initialized and seeded with 22+ services and full data!');
