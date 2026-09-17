@@ -548,14 +548,47 @@ app.get('/api/services/:id', async (req, res) => {
 });
 
 app.post('/api/services', async (req, res) => {
-  const { title, description, duration, price, discount_id, image_url } = req.body;
+  const { title, description, duration, price, discount_id, image_url, category_id, category_ids } = req.body;
+  if (!title || !title.trim()) {
+    return res.status(400).json({ error: 'Название услуги обязательно' });
+  }
   try {
     const result = await pool.query(
       `INSERT INTO services (title, description, duration, price, discount_id, image_url)
        VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-      [title, description || '', parseInt(duration, 10) || 30, parseFloat(price) || 0, discount_id || 1, image_url || null]
+      [title.trim(), description || '', parseInt(duration, 10) || 30, parseFloat(price) || 0, discount_id || 1, image_url || null]
     );
-    res.status(201).json(result.rows[0]);
+    const newService = result.rows[0];
+
+    const catIdsToLink = [];
+    if (category_id) catIdsToLink.push(category_id);
+    if (Array.isArray(category_ids)) {
+      category_ids.forEach(id => {
+        if (!catIdsToLink.includes(id)) catIdsToLink.push(id);
+      });
+    }
+
+    for (const catId of catIdsToLink) {
+      await pool.query(
+        `INSERT INTO services_categories (service_id, category_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+        [newService.id_service, catId]
+      );
+    }
+
+    const fullRes = await pool.query(`
+      SELECT 
+        s.*,
+        d.title AS discount_title,
+        COALESCE(d.percentage, 0) AS discount_percentage,
+        COALESCE(ARRAY_AGG(sc.category_id) FILTER (WHERE sc.category_id IS NOT NULL), '{}') AS category_ids
+      FROM services s
+      LEFT JOIN discounts d ON s.discount_id = d.id_discount
+      LEFT JOIN services_categories sc ON s.id_service = sc.service_id
+      WHERE s.id_service = $1
+      GROUP BY s.id_service, d.title, d.percentage
+    `, [newService.id_service]);
+
+    res.status(201).json(fullRes.rows[0]);
   } catch (err) {
     console.error('Error creating service:', err);
     res.status(500).json({ error: err.message });

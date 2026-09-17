@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { getServices } from '../api/services';
+import { getServices, createService, deleteService } from '../api/services';
 import { getUsers } from '../api/users';
 import { getDiscounts } from '../api/discounts';
 import { getСategories, createCategory, deleteCategory } from '../api/categories';
@@ -9,7 +9,7 @@ import { useAuth } from '../context/AuthContext';
 
 export default function AdminDiscountManager() {
   const { user } = useAuth();
-  const [activeTab, setActiveTab] = useState('user-discounts'); // 'user-discounts', 'service-discounts', 'categories', 'orders'
+  const [activeTab, setActiveTab] = useState('services'); // 'services', 'user-discounts', 'categories', 'orders'
 
   const [users, setUsers] = useState([]);
   const [services, setServices] = useState([]);
@@ -24,6 +24,18 @@ export default function AdminDiscountManager() {
 
   // New Category Form
   const [newCatTitle, setNewCatTitle] = useState('');
+
+  // New Service Form
+  const [newService, setNewService] = useState({
+    title: '',
+    description: '',
+    duration: 45,
+    price: '',
+    category_id: '',
+    discount_id: 1,
+    image_url: '',
+  });
+  const [creatingService, setCreatingService] = useState(false);
 
   const isStaffOrAdmin = user && (user.role_id === 1 || user.role_id === 2 || user.role_title === 'Главный администратор' || user.role_title?.includes('Сотрудник'));
 
@@ -45,6 +57,10 @@ export default function AdminDiscountManager() {
       setCategories(cData);
       setAppointments(aData);
       setPayments(pData);
+
+      if (cData.length > 0 && !newService.category_id) {
+        setNewService(prev => ({ ...prev, category_id: String(cData[0].id_category) }));
+      }
     } catch (err) {
       setError(err.message || 'Ошибка загрузки данных администрирования');
     } finally {
@@ -118,6 +134,56 @@ export default function AdminDiscountManager() {
     }
   };
 
+  const handleCreateService = async (e) => {
+    e.preventDefault();
+    if (!newService.title.trim() || !newService.price) {
+      setError('Укажите название и стоимость услуги');
+      return;
+    }
+    setCreatingService(true);
+    setError(null);
+    try {
+      const created = await createService({
+        title: newService.title.trim(),
+        description: newService.description.trim(),
+        duration: parseInt(newService.duration, 10) || 30,
+        price: parseFloat(newService.price) || 0,
+        discount_id: Number(newService.discount_id) || 1,
+        category_id: newService.category_id ? Number(newService.category_id) : (categories[0]?.id_category || null),
+        image_url: newService.image_url.trim() || null,
+      });
+
+      setServices(prev => [...prev, created]);
+      setNewService({
+        title: '',
+        description: '',
+        duration: 45,
+        price: '',
+        category_id: categories[0]?.id_category ? String(categories[0].id_category) : '',
+        discount_id: 1,
+        image_url: '',
+      });
+      setSuccessMsg(`Услуга «${created.title}» успешно добавлена в каталог!`);
+      setTimeout(() => setSuccessMsg(''), 4000);
+    } catch (err) {
+      setError(err.message || 'Ошибка добавления услуги');
+    } finally {
+      setCreatingService(false);
+    }
+  };
+
+  const handleDeleteService = async (serviceId) => {
+    if (!window.confirm('Удалить эту услугу из каталога?')) return;
+    try {
+      await deleteService(serviceId);
+      setServices(prev => prev.filter(s => s.id_service !== serviceId));
+      setSuccessMsg('Услуга удалена из каталога');
+      setTimeout(() => setSuccessMsg(''), 3000);
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
   if (!isStaffOrAdmin) {
     return (
       <div className="page-container" style={{ textAlign: 'center', padding: '4rem 1rem' }}>
@@ -133,7 +199,7 @@ export default function AdminDiscountManager() {
         <div>
           <h1 className="page-title">Панель управления магазином</h1>
           <p className="page-subtitle">
-            Управление персональными скидками пользователей, скидками на товары, категориями и заказами
+            Добавление и управление услугами, скидками на товары, персональными купонами и категориями
           </p>
         </div>
       </div>
@@ -154,17 +220,17 @@ export default function AdminDiscountManager() {
       <div className="admin-nav-bar" style={{ marginBottom: '1.5rem' }}>
         <button
           type="button"
+          className={`admin-nav-tab ${activeTab === 'services' ? 'active' : ''}`}
+          onClick={() => setActiveTab('services')}
+        >
+          Услуги и добавление ({services.length})
+        </button>
+        <button
+          type="button"
           className={`admin-nav-tab ${activeTab === 'user-discounts' ? 'active' : ''}`}
           onClick={() => setActiveTab('user-discounts')}
         >
           Персональные скидки пользователей ({users.length})
-        </button>
-        <button
-          type="button"
-          className={`admin-nav-tab ${activeTab === 'service-discounts' ? 'active' : ''}`}
-          onClick={() => setActiveTab('service-discounts')}
-        >
-          Скидки на услуги и товары ({services.length})
         </button>
         <button
           type="button"
@@ -188,7 +254,178 @@ export default function AdminDiscountManager() {
         </div>
       ) : (
         <>
-          {/* 1. USER DISCOUNTS */}
+          {/* 1. SERVICES MANAGEMENT & ADDING */}
+          {activeTab === 'services' && (
+            <div>
+              {/* Form to Add New Service */}
+              <div className="admin-form" style={{ marginBottom: '2rem' }}>
+                <h3>+ Добавить новую услугу в каталог</h3>
+                <form onSubmit={handleCreateService}>
+                  <div className="form-grid">
+                    <div className="form-group">
+                      <label className="form-label">Название услуги *</label>
+                      <input
+                        type="text"
+                        placeholder="Например: Стрижка бороды и усов"
+                        value={newService.title}
+                        onChange={(e) => setNewService({ ...newService, title: e.target.value })}
+                        required
+                      />
+                    </div>
+
+                    <div className="form-group">
+                      <label className="form-label">Категория *</label>
+                      <select
+                        value={newService.category_id}
+                        onChange={(e) => setNewService({ ...newService, category_id: e.target.value })}
+                        required
+                      >
+                        {categories.map((c) => (
+                          <option key={c.id_category} value={c.id_category}>
+                            {c.title}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="form-group">
+                      <label className="form-label">Базовая цена (₽) *</label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="50"
+                        placeholder="1500"
+                        value={newService.price}
+                        onChange={(e) => setNewService({ ...newService, price: e.target.value })}
+                        required
+                      />
+                    </div>
+
+                    <div className="form-group">
+                      <label className="form-label">Длительность (мин.)</label>
+                      <input
+                        type="number"
+                        min="5"
+                        max="360"
+                        step="5"
+                        value={newService.duration}
+                        onChange={(e) => setNewService({ ...newService, duration: e.target.value })}
+                      />
+                    </div>
+
+                    <div className="form-group">
+                      <label className="form-label">Скидка на товар</label>
+                      <select
+                        value={newService.discount_id}
+                        onChange={(e) => setNewService({ ...newService, discount_id: Number(e.target.value) })}
+                      >
+                        {discounts.map((d) => (
+                          <option key={d.id_discount} value={d.id_discount}>
+                            {d.title} ({d.percentage}%)
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="form-group">
+                      <label className="form-label">Ссылка на фото (URL)</label>
+                      <input
+                        type="url"
+                        placeholder="https://images.unsplash.com/..."
+                        value={newService.image_url}
+                        onChange={(e) => setNewService({ ...newService, image_url: e.target.value })}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="form-group" style={{ marginBottom: '1rem' }}>
+                    <label className="form-label">Описание услуги</label>
+                    <textarea
+                      rows="2"
+                      placeholder="Краткое описание процедуры и преимуществ..."
+                      value={newService.description}
+                      onChange={(e) => setNewService({ ...newService, description: e.target.value })}
+                      style={{ width: '100%', background: 'var(--bg-input)', border: '1px solid var(--border-subtle)', color: 'var(--text-main)', padding: '0.5rem', borderRadius: '4px' }}
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    className="btn btn-primary"
+                    disabled={creatingService || !newService.title.trim() || !newService.price}
+                  >
+                    {creatingService ? 'Добавление...' : 'Создать услугу'}
+                  </button>
+                </form>
+              </div>
+
+              {/* Existing Services List */}
+              <div className="table-responsive">
+                <table className="admin-table">
+                  <thead>
+                    <tr>
+                      <th>ID</th>
+                      <th>Название услуги</th>
+                      <th>Длительность</th>
+                      <th>Базовая цена</th>
+                      <th>Скидка на товар</th>
+                      <th>Итоговая цена</th>
+                      <th>Действия</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {services.map((s) => {
+                      const disc = discounts.find(d => Number(d.id_discount) === Number(s.discount_id));
+                      const pct = disc ? disc.percentage : 0;
+                      const finalPrice = pct > 0 ? Math.round(parseFloat(s.price) * (1 - pct / 100)) : parseFloat(s.price);
+
+                      return (
+                        <tr key={s.id_service}>
+                          <td className="row-number-cell">{s.id_service}</td>
+                          <td>
+                            <div style={{ fontWeight: '600' }}>{s.title}</div>
+                            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{s.description || '—'}</div>
+                          </td>
+                          <td>{s.duration || 30} мин.</td>
+                          <td>{parseFloat(s.price).toLocaleString()} ₽</td>
+                          <td>
+                            <select
+                              value={s.discount_id || 1}
+                              onChange={(e) => handleUpdateServiceDiscount(s.id_service, e.target.value)}
+                              style={{ padding: '0.35rem 0.6rem', fontSize: '0.85rem' }}
+                            >
+                              {discounts.map((d) => (
+                                <option key={d.id_discount} value={d.id_discount}>
+                                  {d.title} ({d.percentage}%)
+                                </option>
+                              ))}
+                            </select>
+                          </td>
+                          <td>
+                            <strong style={{ color: pct > 0 ? 'var(--accent-warning)' : 'var(--text-main)' }}>
+                              {finalPrice.toLocaleString()} ₽
+                            </strong>
+                            {pct > 0 && <span className="badge badge-warning" style={{ marginLeft: '0.5rem' }}>-{pct}%</span>}
+                          </td>
+                          <td>
+                            <button
+                              type="button"
+                              className="btn btn-danger btn-sm"
+                              onClick={() => handleDeleteService(s.id_service)}
+                            >
+                              Удалить
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* 2. USER DISCOUNTS */}
           {activeTab === 'user-discounts' && (
             <div className="table-responsive">
               <table className="admin-table">
@@ -202,94 +439,36 @@ export default function AdminDiscountManager() {
                   </tr>
                 </thead>
                 <tbody>
-                  {users.map((u) => {
-                    const currentDisc = discounts.find(d => Number(d.id_discount) === Number(u.discount_id));
-                    return (
-                      <tr key={u.id_user}>
-                        <td className="row-number-cell">{u.id_user}</td>
-                        <td>
-                          <strong>{u.second_name} {u.first_name} {u.middle_name || ''}</strong>
-                        </td>
-                        <td>
-                          <div>{u.email}</div>
-                          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{u.phone || '—'}</div>
-                        </td>
-                        <td>
-                          <span className={`badge ${u.role_id === 1 ? 'badge-primary' : 'badge-secondary'}`}>
-                            {u.role_title || (u.role_id === 1 ? 'Администратор' : 'Клиент')}
-                          </span>
-                        </td>
-                        <td>
-                          <select
-                            value={u.discount_id || 1}
-                            onChange={(e) => handleUpdateUserDiscount(u.id_user, e.target.value)}
-                            style={{ padding: '0.35rem 0.6rem', fontSize: '0.85rem' }}
-                          >
-                            {discounts.map((d) => (
-                              <option key={d.id_discount} value={d.id_discount}>
-                                {d.title} ({d.percentage}%)
-                              </option>
-                            ))}
-                          </select>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          {/* 2. SERVICE DISCOUNTS */}
-          {activeTab === 'service-discounts' && (
-            <div className="table-responsive">
-              <table className="admin-table">
-                <thead>
-                  <tr>
-                    <th>ID</th>
-                    <th>Название услуги</th>
-                    <th>Длительность</th>
-                    <th>Базовая цена</th>
-                    <th>Общая скидка на товар</th>
-                    <th>Итоговая цена</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {services.map((s) => {
-                    const disc = discounts.find(d => Number(d.id_discount) === Number(s.discount_id));
-                    const pct = disc ? disc.percentage : 0;
-                    const finalPrice = pct > 0 ? Math.round(parseFloat(s.price) * (1 - pct / 100)) : parseFloat(s.price);
-
-                    return (
-                      <tr key={s.id_service}>
-                        <td className="row-number-cell">{s.id_service}</td>
-                        <td>
-                          <div style={{ fontWeight: '600' }}>{s.title}</div>
-                        </td>
-                        <td>{s.duration || 30} мин.</td>
-                        <td>{parseFloat(s.price).toLocaleString()} ₽</td>
-                        <td>
-                          <select
-                            value={s.discount_id || 1}
-                            onChange={(e) => handleUpdateServiceDiscount(s.id_service, e.target.value)}
-                            style={{ padding: '0.35rem 0.6rem', fontSize: '0.85rem' }}
-                          >
-                            {discounts.map((d) => (
-                              <option key={d.id_discount} value={d.id_discount}>
-                                {d.title} ({d.percentage}%)
-                              </option>
-                            ))}
-                          </select>
-                        </td>
-                        <td>
-                          <strong style={{ color: pct > 0 ? 'var(--accent-warning)' : 'var(--text-main)' }}>
-                            {finalPrice.toLocaleString()} ₽
-                          </strong>
-                          {pct > 0 && <span className="badge badge-warning" style={{ marginLeft: '0.5rem' }}>-{pct}%</span>}
-                        </td>
-                      </tr>
-                    );
-                  })}
+                  {users.map((u) => (
+                    <tr key={u.id_user}>
+                      <td className="row-number-cell">{u.id_user}</td>
+                      <td>
+                        <strong>{u.second_name} {u.first_name} {u.middle_name || ''}</strong>
+                      </td>
+                      <td>
+                        <div>{u.email}</div>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{u.phone || '—'}</div>
+                      </td>
+                      <td>
+                        <span className={`badge ${u.role_id === 1 ? 'badge-primary' : 'badge-secondary'}`}>
+                          {u.role_title || (u.role_id === 1 ? 'Администратор' : 'Клиент')}
+                        </span>
+                      </td>
+                      <td>
+                        <select
+                          value={u.discount_id || 1}
+                          onChange={(e) => handleUpdateUserDiscount(u.id_user, e.target.value)}
+                          style={{ padding: '0.35rem 0.6rem', fontSize: '0.85rem' }}
+                        >
+                          {discounts.map((d) => (
+                            <option key={d.id_discount} value={d.id_discount}>
+                              {d.title} ({d.percentage}%)
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>
