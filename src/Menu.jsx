@@ -57,22 +57,22 @@ function Menu() {
               <span className="user-name">
                 {user.first_name || 'Пользователь'} {user.second_name || ''}
               </span>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginTop: '0.15rem' }}>
+              <div className="user-subinfo">
                 <span className="user-role-badge">
                   {user.role_title || (user.role_id === 1 ? 'Администратор' : 'Клиент')}
                 </span>
                 {user.discount_percentage > 0 && (
-                  <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-                    Купон {user.discount_percentage}%
+                  <span className="user-coupon-badge">
+                    Скидка {user.discount_percentage}%
                   </span>
                 )}
               </div>
             </div>
             <button
               type="button"
-              className="btn btn-secondary btn-sm"
+              className="btn-topbar-logout"
               onClick={handleLogout}
-              style={{ fontSize: '0.75rem', padding: '0.35rem 0.65rem' }}
+              title="Выйти из аккаунта"
             >
               Выйти
             </button>
