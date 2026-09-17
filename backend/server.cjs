@@ -17,7 +17,7 @@ const pool = new Pool({
   host: process.env.PG_HOST || 'localhost',
   user: process.env.PG_USER || 'postgres',
   password: process.env.PG_PASSWORD || '123456',
-  database: process.env.PG_DATABASE || 'salon_db2',
+  database: process.env.PG_DATABASE || 'salon_db',
   port: process.env.PG_PORT || 5432,
 });
 
@@ -235,6 +235,60 @@ app.post('/api/users/login', async (req, res) => {
   }
 });
 
+// Password recovery / reset endpoints
+app.post('/api/auth/forgot-password', async (req, res) => {
+  const { email } = req.body;
+  if (!email) return res.status(400).json({ error: 'Укажите email' });
+  try {
+    const userRes = await pool.query('SELECT * FROM users WHERE LOWER(email) = LOWER($1)', [email.trim()]);
+    if (userRes.rowCount === 0) {
+      return res.status(404).json({ error: 'Пользователь с таким email не найден' });
+    }
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 mins
+    await pool.query(`
+      INSERT INTO password_resets (email, code, expires_at)
+      VALUES ($1, $2, $3)
+      ON CONFLICT (email) DO UPDATE SET code = EXCLUDED.code, expires_at = EXCLUDED.expires_at
+    `, [email.trim().toLowerCase(), code, expiresAt]);
+
+    res.json({
+      success: true,
+      message: 'Код подтверждения успешно сгенерирован',
+      code,
+      email: email.trim()
+    });
+  } catch (err) {
+    console.error('Forgot password error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/auth/reset-password', async (req, res) => {
+  const { email, code, new_password } = req.body;
+  if (!email || !code || !new_password) {
+    return res.status(400).json({ error: 'Все поля обязательны' });
+  }
+  if (new_password.length < 4) {
+    return res.status(400).json({ error: 'Пароль должен содержать минимум 4 символа' });
+  }
+  try {
+    const resetRes = await pool.query(
+      'SELECT * FROM password_resets WHERE LOWER(email) = LOWER($1) AND code = $2 AND expires_at > NOW()',
+      [email.trim(), code.trim()]
+    );
+    if (resetRes.rowCount === 0) {
+      return res.status(400).json({ error: 'Неверный или просроченный код подтверждения' });
+    }
+    await pool.query('UPDATE users SET password = $1 WHERE LOWER(email) = LOWER($2)', [new_password, email.trim()]);
+    await pool.query('DELETE FROM password_resets WHERE LOWER(email) = LOWER($1)', [email.trim()]);
+    res.json({ success: true, message: 'Пароль успешно обновлен' });
+  } catch (err) {
+    console.error('Reset password error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post('/api/auth/register', async (req, res) => {
   const { first_name, second_name, middle_name, email, password, phone, address } = req.body;
 
@@ -381,30 +435,6 @@ app.put('/api/users/:id', async (req, res) => {
   }
 });
 
-app.put('/api/users/:id/discount', async (req, res) => {
-  const { discount_id } = req.body;
-  try {
-    const result = await pool.query(
-      `UPDATE users SET discount_id = $1 WHERE id_user = $2 RETURNING *`,
-      [discount_id || 1, req.params.id]
-    );
-    if (result.rowCount === 0) return res.status(404).json({ error: 'Пользователь не найден' });
-
-    const fullUser = await pool.query(`
-      SELECT u.*, r.title as role_title, d.title as discount_title, d.percentage as discount_percentage
-      FROM users u
-      LEFT JOIN roles r ON u.role_id = r.id_role
-      LEFT JOIN discounts d ON u.discount_id = d.id_discount
-      WHERE u.id_user = $1
-    `, [req.params.id]);
-
-    res.json(fullUser.rows[0]);
-  } catch (err) {
-    console.error('Error updating user discount:', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
 app.delete('/api/users/:id', async (req, res) => {
   try {
     const targetUser = await pool.query('SELECT * FROM users WHERE id_user = $1', [req.params.id]);
@@ -491,18 +521,7 @@ app.delete('/api/categories/:id', async (req, res) => {
 // ==========================================
 app.get('/api/services', async (req, res) => {
   try {
-    const result = await pool.query(`
-      SELECT 
-        s.*,
-        d.title AS discount_title,
-        COALESCE(d.percentage, 0) AS discount_percentage,
-        COALESCE(ARRAY_AGG(sc.category_id) FILTER (WHERE sc.category_id IS NOT NULL), '{}') AS category_ids
-      FROM services s
-      LEFT JOIN discounts d ON s.discount_id = d.id_discount
-      LEFT JOIN services_categories sc ON s.id_service = sc.service_id
-      GROUP BY s.id_service, d.title, d.percentage
-      ORDER BY s.id_service ASC
-    `);
+    const result = await pool.query('SELECT * FROM services ORDER BY id_service ASC');
     res.json(result.rows);
   } catch (err) {
     console.error('Error getting services:', err);
@@ -510,35 +529,9 @@ app.get('/api/services', async (req, res) => {
   }
 });
 
-app.put('/api/services/:id/discount', async (req, res) => {
-  const { discount_id } = req.body;
-  try {
-    const result = await pool.query(
-      `UPDATE services SET discount_id = $1 WHERE id_service = $2 RETURNING *`,
-      [discount_id || 1, req.params.id]
-    );
-    if (result.rowCount === 0) return res.status(404).json({ error: 'Услуга не найдена' });
-    res.json(result.rows[0]);
-  } catch (err) {
-    console.error('Error updating service discount:', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
 app.get('/api/services/:id', async (req, res) => {
   try {
-    const result = await pool.query(`
-      SELECT 
-        s.*,
-        d.title AS discount_title,
-        COALESCE(d.percentage, 0) AS discount_percentage,
-        COALESCE(ARRAY_AGG(sc.category_id) FILTER (WHERE sc.category_id IS NOT NULL), '{}') AS category_ids
-      FROM services s
-      LEFT JOIN discounts d ON s.discount_id = d.id_discount
-      LEFT JOIN services_categories sc ON s.id_service = sc.service_id
-      WHERE s.id_service = $1
-      GROUP BY s.id_service, d.title, d.percentage
-    `, [req.params.id]);
+    const result = await pool.query('SELECT * FROM services WHERE id_service = $1', [req.params.id]);
     if (result.rowCount === 0) return res.status(404).json({ error: 'Услуга не найдена' });
     res.json(result.rows[0]);
   } catch (err) {
@@ -548,47 +541,14 @@ app.get('/api/services/:id', async (req, res) => {
 });
 
 app.post('/api/services', async (req, res) => {
-  const { title, description, duration, price, discount_id, image_url, category_id, category_ids } = req.body;
-  if (!title || !title.trim()) {
-    return res.status(400).json({ error: 'Название услуги обязательно' });
-  }
+  const { title, description, duration, price, discount_id, image_url } = req.body;
   try {
     const result = await pool.query(
       `INSERT INTO services (title, description, duration, price, discount_id, image_url)
        VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-      [title.trim(), description || '', parseInt(duration, 10) || 30, parseFloat(price) || 0, discount_id || 1, image_url || null]
+      [title, description || '', parseInt(duration, 10) || 30, parseFloat(price) || 0, discount_id || 1, image_url || null]
     );
-    const newService = result.rows[0];
-
-    const catIdsToLink = [];
-    if (category_id) catIdsToLink.push(category_id);
-    if (Array.isArray(category_ids)) {
-      category_ids.forEach(id => {
-        if (!catIdsToLink.includes(id)) catIdsToLink.push(id);
-      });
-    }
-
-    for (const catId of catIdsToLink) {
-      await pool.query(
-        `INSERT INTO services_categories (service_id, category_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
-        [newService.id_service, catId]
-      );
-    }
-
-    const fullRes = await pool.query(`
-      SELECT 
-        s.*,
-        d.title AS discount_title,
-        COALESCE(d.percentage, 0) AS discount_percentage,
-        COALESCE(ARRAY_AGG(sc.category_id) FILTER (WHERE sc.category_id IS NOT NULL), '{}') AS category_ids
-      FROM services s
-      LEFT JOIN discounts d ON s.discount_id = d.id_discount
-      LEFT JOIN services_categories sc ON s.id_service = sc.service_id
-      WHERE s.id_service = $1
-      GROUP BY s.id_service, d.title, d.percentage
-    `, [newService.id_service]);
-
-    res.status(201).json(fullRes.rows[0]);
+    res.status(201).json(result.rows[0]);
   } catch (err) {
     console.error('Error creating service:', err);
     res.status(500).json({ error: err.message });
@@ -1187,8 +1147,97 @@ app.delete('/api/payments/:id', async (req, res) => {
   }
 });
 
+// ==========================================
+// 12. REVIEWS (Anti-Spam Timer & Cooldown)
+// ==========================================
+app.get('/api/reviews', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT r.*,
+             u.first_name, u.second_name, u.email as user_email,
+             s.title as service_title
+      FROM reviews r
+      LEFT JOIN users u ON r.user_id = u.id_user
+      LEFT JOIN services s ON r.service_id = s.id_service
+      ORDER BY r.created_at DESC
+    `);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error getting reviews:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/reviews', async (req, res) => {
+  const { user_id, service_id, rating, comment } = req.body;
+  if (!user_id || !rating || !comment) {
+    return res.status(400).json({ error: 'Оценка и комментарий обязательны' });
+  }
+  const ratingNum = parseInt(rating, 10);
+  if (isNaN(ratingNum) || ratingNum < 1 || ratingNum > 5) {
+    return res.status(400).json({ error: 'Оценка должна быть от 1 до 5' });
+  }
+  try {
+    // Check if user posted a review recently (3 minutes cooldown)
+    const recent = await pool.query(
+      `SELECT id_review, EXTRACT(EPOCH FROM (NOW() - created_at)) as elapsed
+       FROM reviews
+       WHERE user_id = $1 AND (NOW() - created_at) < interval '3 minutes'
+       ORDER BY created_at DESC LIMIT 1`,
+      [user_id]
+    );
+    if (recent.rowCount > 0) {
+      const remaining = Math.ceil(180 - parseFloat(recent.rows[0].elapsed));
+      return res.status(429).json({
+        error: `Защита от спама: подождите ${remaining} сек. перед новым отзывом или отредактируйте существующий отзыв.`,
+        remaining
+      });
+    }
+
+    const result = await pool.query(
+      `INSERT INTO reviews (user_id, service_id, rating, comment)
+       VALUES ($1, $2, $3, $4) RETURNING *`,
+      [user_id, service_id || null, ratingNum, comment.trim()]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error('Error creating review:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/reviews/:id', async (req, res) => {
+  const { rating, comment, service_id } = req.body;
+  try {
+    const result = await pool.query(
+      `UPDATE reviews
+       SET rating = COALESCE($1, rating),
+           comment = COALESCE($2, comment),
+           service_id = COALESCE($3, service_id),
+           updated_at = NOW()
+       WHERE id_review = $4 RETURNING *`,
+      [rating ? parseInt(rating, 10) : null, comment ? comment.trim() : null, service_id || null, req.params.id]
+    );
+    if (result.rowCount === 0) return res.status(404).json({ error: 'Отзыв не найден' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Error updating review:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/reviews/:id', async (req, res) => {
+  try {
+    const result = await pool.query('DELETE FROM reviews WHERE id_review = $1', [req.params.id]);
+    if (result.rowCount === 0) return res.status(404).json({ error: 'Отзыв не найден' });
+    res.status(204).end();
+  } catch (err) {
+    console.error('Error deleting review:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Start the server
 app.listen(port, () => {
   console.log(`Server running on http://localhost:${port}`);
 });
-

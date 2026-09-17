@@ -215,7 +215,7 @@ function Login() {
               setFieldErrors({});
             }}
           >
-            Вход в систему
+            Авторизация
           </button>
           <button
             type="button"
@@ -287,7 +287,7 @@ function Login() {
               style={{ width: '100%', marginTop: '0.5rem' }}
               disabled={loading}
             >
-              {loading ? 'Проверка...' : 'Войти в систему'}
+              {loading ? 'Проверка...' : 'Авторизация'}
             </button>
           </form>
         ) : (

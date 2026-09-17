@@ -7,22 +7,20 @@ const dbConfig = {
   port: 5432,
 };
 
-const targetDb = process.env.PG_DATABASE || 'salon_db2';
-
 async function initDB() {
   const rootClient = new Client({ ...dbConfig, database: 'postgres' });
   await rootClient.connect();
 
-  const checkDb = await rootClient.query("SELECT 1 FROM pg_database WHERE datname = $1", [targetDb]);
+  const checkDb = await rootClient.query("SELECT 1 FROM pg_database WHERE datname = 'salon_db'");
   if (checkDb.rowCount === 0) {
-    console.log(`Creating database ${targetDb}...`);
-    await rootClient.query(`CREATE DATABASE ${targetDb}`);
+    console.log('Creating database salon_db...');
+    await rootClient.query('CREATE DATABASE salon_db');
   } else {
-    console.log(`Database ${targetDb} already exists.`);
+    console.log('Database salon_db already exists.');
   }
   await rootClient.end();
 
-  const pool = new Pool({ ...dbConfig, database: targetDb });
+  const pool = new Pool({ ...dbConfig, database: 'salon_db' });
 
   console.log('Creating/updating tables...');
   await pool.query(`
@@ -115,8 +113,21 @@ async function initDB() {
       total NUMERIC(10, 2) NOT NULL DEFAULT 0
     );
 
-    DROP TABLE IF EXISTS reviews CASCADE;
-    DROP TABLE IF EXISTS password_resets CASCADE;
+    CREATE TABLE IF NOT EXISTS reviews (
+      id_review SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id_user) ON DELETE CASCADE,
+      service_id INTEGER REFERENCES services(id_service) ON DELETE SET NULL,
+      rating INTEGER NOT NULL CHECK (rating >= 1 AND rating <= 5),
+      comment TEXT NOT NULL,
+      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS password_resets (
+      email VARCHAR(100) PRIMARY KEY,
+      code VARCHAR(6) NOT NULL,
+      expires_at TIMESTAMP NOT NULL
+    );
   `);
 
   console.log('Seeding initial data...');
@@ -460,6 +471,20 @@ async function initDB() {
       (1, 2, NOW() - interval '2 days', 3400.00)
     ON CONFLICT (id_payment) DO NOTHING;
     SELECT setval('payments_id_payment_seq', (SELECT COALESCE(MAX(id_payment), 1) FROM payments));
+  `);
+
+  // 10. Sample Reviews
+  await pool.query(`
+    INSERT INTO reviews (id_review, user_id, service_id, rating, comment, created_at) VALUES
+      (1, 2, 1, 5, 'Отличная стрижка! Мастер Анна учла все пожелания и сделала идеальный фейд. Обязательно вернусь снова!', NOW() - interval '1 day'),
+      (2, 2, 4, 5, 'Прекрасный спа-уход и моделирование бороды. Распаривание полотенцем с маслами — это отдельный кайф!', NOW() - interval '3 days'),
+      (3, 1, 1, 5, 'Хожу на мужскую модельную стрижку регулярно. Сервис на высшем уровне, кофе отличный.', NOW() - interval '5 days'),
+      (4, 2, 2, 4, 'Удлиненная стрижка получилась аккуратной, текстура волос сохранена, спасибо мастеру!', NOW() - interval '6 days'),
+      (5, 1, 7, 5, 'Сложное окрашивание AirTouch выполнено безукоризненно! Плавный переход тона и блеск волос.', NOW() - interval '8 days'),
+      (6, 2, 10, 5, 'SPA-уход для волос восстановил структуру после лета, эффект заметен сразу же.', NOW() - interval '10 days'),
+      (7, 1, 22, 5, 'Полный VIP-комплекс — просто восторг. Два мастера работали синхронно, сэкономил кучу времени!', NOW() - interval '12 days')
+    ON CONFLICT (id_review) DO NOTHING;
+    SELECT setval('reviews_id_review_seq', (SELECT COALESCE(MAX(id_review), 7) FROM reviews));
   `);
 
   console.log('Database initialized and seeded with 22+ services and full data!');
