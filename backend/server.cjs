@@ -289,13 +289,116 @@ app.post('/api/auth/reset-password', async (req, res) => {
   }
 });
 
-app.post('/api/users', async (req, res) => {
-  const { role_id, second_name, first_name, middle_name, email, password, discount_id } = req.body;
+app.post('/api/auth/register', async (req, res) => {
+  const { first_name, second_name, middle_name, email, password, phone, address } = req.body;
+
+  if (!first_name || !second_name || !email || !password) {
+    return res.status(400).json({ error: 'Пожалуйста, заполните обязательные поля (Имя, Фамилия, Email, Пароль)' });
+  }
+
+  if (password.length < 4) {
+    return res.status(400).json({ error: 'Пароль должен быть не менее 4 символов' });
+  }
+
+  try {
+    const existing = await pool.query('SELECT * FROM users WHERE LOWER(email) = LOWER($1)', [email.trim()]);
+    if (existing.rowCount > 0) {
+      return res.status(400).json({ error: 'Пользователь с таким email уже зарегистрирован' });
+    }
+
+    const insertRes = await pool.query(
+      `INSERT INTO users (role_id, second_name, first_name, middle_name, email, password, discount_id, phone, address)
+       VALUES (4, $1, $2, $3, $4, $5, 1, $6, $7)
+       RETURNING *`,
+      [second_name.trim(), first_name.trim(), middle_name ? middle_name.trim() : '', email.trim(), password, phone ? phone.trim() : '', address ? address.trim() : '']
+    );
+
+    const newUser = insertRes.rows[0];
+
+    // Create empty cart for new user
+    await pool.query('INSERT INTO carts (user_id) VALUES ($1) ON CONFLICT (user_id) DO NOTHING', [newUser.id_user]);
+
+    // Fetch full user details with role
+    const fullUser = await pool.query(`
+      SELECT u.*, r.title as role_title, d.title as discount_title, d.percentage as discount_percentage
+      FROM users u
+      LEFT JOIN roles r ON u.role_id = r.id_role
+      LEFT JOIN discounts d ON u.discount_id = d.id_discount
+      WHERE u.id_user = $1
+    `, [newUser.id_user]);
+
+    res.status(201).json(fullUser.rows[0]);
+  } catch (err) {
+    console.error('Registration error:', err);
+    res.status(500).json({ error: err.message || 'Ошибка регистрации' });
+  }
+});
+
+app.put('/api/users/profile/:id', async (req, res) => {
+  const { first_name, second_name, middle_name, email, phone, address } = req.body;
   try {
     const result = await pool.query(
-      `INSERT INTO users (role_id, second_name, first_name, middle_name, email, password, discount_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
-      [role_id || 4, second_name, first_name, middle_name || '', email, password, discount_id || 1]
+      `UPDATE users
+       SET first_name = COALESCE($1, first_name),
+           second_name = COALESCE($2, second_name),
+           middle_name = COALESCE($3, middle_name),
+           email = COALESCE($4, email),
+           phone = COALESCE($5, phone),
+           address = COALESCE($6, address)
+       WHERE id_user = $7
+       RETURNING *`,
+      [first_name, second_name, middle_name, email, phone, address, req.params.id]
+    );
+
+    if (result.rowCount === 0) return res.status(404).json({ error: 'Пользователь не найден' });
+
+    const fullUser = await pool.query(`
+      SELECT u.*, r.title as role_title, d.title as discount_title, d.percentage as discount_percentage
+      FROM users u
+      LEFT JOIN roles r ON u.role_id = r.id_role
+      LEFT JOIN discounts d ON u.discount_id = d.id_discount
+      WHERE u.id_user = $1
+    `, [req.params.id]);
+
+    res.json(fullUser.rows[0]);
+  } catch (err) {
+    console.error('Error updating user profile:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/users/change-password/:id', async (req, res) => {
+  const { currentPassword, newPassword } = req.body;
+  if (!currentPassword || !newPassword) {
+    return res.status(400).json({ error: 'Укажите текущий и новый пароль' });
+  }
+  if (newPassword.length < 4) {
+    return res.status(400).json({ error: 'Новый пароль должен быть от 4 символов' });
+  }
+  try {
+    const userRes = await pool.query('SELECT * FROM users WHERE id_user = $1', [req.params.id]);
+    if (userRes.rowCount === 0) return res.status(404).json({ error: 'Пользователь не найден' });
+
+    const user = userRes.rows[0];
+    if (user.password !== currentPassword) {
+      return res.status(400).json({ error: 'Текущий пароль введен неверно' });
+    }
+
+    await pool.query('UPDATE users SET password = $1 WHERE id_user = $2', [newPassword, req.params.id]);
+    res.json({ success: true, message: 'Пароль успешно изменен' });
+  } catch (err) {
+    console.error('Error changing password:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/users', async (req, res) => {
+  const { role_id, second_name, first_name, middle_name, email, password, discount_id, phone, address } = req.body;
+  try {
+    const result = await pool.query(
+      `INSERT INTO users (role_id, second_name, first_name, middle_name, email, password, discount_id, phone, address)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
+      [role_id || 4, second_name, first_name, middle_name || '', email, password, discount_id || 1, phone || '', address || '']
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -566,6 +669,38 @@ app.get('/api/appointments', async (req, res) => {
   }
 });
 
+app.get('/api/appointments/user/:userId', async (req, res) => {
+  try {
+    const appointmentsResult = await pool.query(`
+      SELECT a.*,
+             m.first_name as master_first_name, m.second_name as master_second_name, m.email as master_email
+      FROM appointments a
+      LEFT JOIN users m ON a.master_id = m.id_user
+      WHERE a.user_id = $1
+      ORDER BY a.appointment_date DESC
+    `, [req.params.userId]);
+
+    const appointments = appointmentsResult.rows;
+
+    for (const app of appointments) {
+      const itemsRes = await pool.query(`
+        SELECT aps.service_id, aps.quantity, s.title, s.price, s.duration, s.image_url
+        FROM appointments_services aps
+        JOIN services s ON aps.service_id = s.id_service
+        WHERE aps.appointment_id = $1
+      `, [app.id_appointment]);
+
+      app.services = itemsRes.rows;
+      app.totalPrice = itemsRes.rows.reduce((sum, item) => sum + (parseFloat(item.price) * item.quantity), 0);
+    }
+
+    res.json(appointments);
+  } catch (err) {
+    console.error('Error getting user appointments:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/api/appointments/:id', async (req, res) => {
   try {
     const result = await pool.query(`
@@ -586,12 +721,12 @@ app.get('/api/appointments/:id', async (req, res) => {
 });
 
 app.post('/api/appointments', async (req, res) => {
-  const { user_id, master_id, appointment_date, note, is_completed } = req.body;
+  const { user_id, master_id, appointment_date, note, address, is_completed } = req.body;
   try {
     const result = await pool.query(
-      `INSERT INTO appointments (user_id, master_id, appointment_date, note, is_completed)
-       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-      [user_id, master_id, appointment_date, note || '', is_completed || false]
+      `INSERT INTO appointments (user_id, master_id, appointment_date, note, address, is_completed)
+       VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+      [user_id, master_id, appointment_date, note || '', address || '', is_completed || false]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -601,13 +736,13 @@ app.post('/api/appointments', async (req, res) => {
 });
 
 app.put('/api/appointments/:id', async (req, res) => {
-  const { user_id, master_id, appointment_date, note, is_completed } = req.body;
+  const { user_id, master_id, appointment_date, note, address, is_completed } = req.body;
   try {
     const result = await pool.query(
       `UPDATE appointments
-       SET user_id = $1, master_id = $2, appointment_date = $3, note = $4, is_completed = $5
-       WHERE id_appointment = $6 RETURNING *`,
-      [user_id, master_id, appointment_date, note, is_completed, req.params.id]
+       SET user_id = $1, master_id = $2, appointment_date = $3, note = $4, address = $5, is_completed = $6
+       WHERE id_appointment = $7 RETURNING *`,
+      [user_id, master_id, appointment_date, note, address || '', is_completed, req.params.id]
     );
     if (result.rowCount === 0) return res.status(404).json({ error: 'Запись не найдена' });
     res.json(result.rows[0]);

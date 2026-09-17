@@ -120,6 +120,16 @@ function Menu() {
             {totalCount > 0 && <span className="nav-counter">{totalCount}</span>}
           </NavLink>
 
+          {/* Profile / Account Link */}
+          {user && (
+            <NavLink
+              to="/profile"
+              className={({ isActive }) => (isActive ? 'nav-btn active' : 'nav-btn')}
+            >
+              Кабинет
+            </NavLink>
+          )}
+
           {/* Admin / Staff Tables Dropdown */}
           {isStaffOrAdmin && (
             <div className="nav-dropdown-wrapper">
@@ -152,12 +162,14 @@ function Menu() {
       <div className="topbar-right">
         {user ? (
           <div className="user-profile-summary">
-            <span className="user-name-label">
-              {user.first_name ? `${user.first_name} ${user.second_name || ''}` : user.email}
-            </span>
-            <span className="user-role-tag">
-              {user.role_title || 'Клиент'}
-            </span>
+            <NavLink to="/profile" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <span className="user-name-label">
+                {user.first_name ? `${user.first_name} ${user.second_name || ''}` : user.email}
+              </span>
+              <span className="user-role-tag">
+                {user.role_title || 'Клиент'}
+              </span>
+            </NavLink>
             <button
               onClick={logout}
               className="btn-minimal-logout"

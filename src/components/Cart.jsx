@@ -15,12 +15,19 @@ export default function Cart() {
     return d.toISOString().split('T')[0];
   });
   const [selectedSlot, setSelectedSlot] = useState('11:30');
+  const [address, setAddress] = useState(user?.address || '');
   const [note, setNote] = useState('');
   const [checkoutSuccess, setCheckoutSuccess] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [checkoutError, setCheckoutError] = useState(null);
 
   const timeSlots = ['09:00', '10:00', '11:30', '13:00', '14:30', '16:00', '17:30', '19:00', '20:30'];
+
+  useEffect(() => {
+    if (user?.address) {
+      setAddress(user.address);
+    }
+  }, [user]);
 
   useEffect(() => {
     async function loadMasters() {
@@ -74,11 +81,17 @@ export default function Cart() {
     e.preventDefault();
     if (cart.length === 0) return;
     if (!user) {
-      setCheckoutError('Необходима авторизация для оформления записи');
+      setCheckoutError('Необходима авторизация для оформления заказа');
       return;
     }
     if (!selectedMasterId) {
-      setCheckoutError('Пожалуйста, выберите мастера');
+      setCheckoutError('Пожалуйста, выберите специалиста');
+      return;
+    }
+
+    const todayStr = new Date().toISOString().split('T')[0];
+    if (selectedDate < todayStr) {
+      setCheckoutError('Дата не может быть меньше текущей даты');
       return;
     }
 
@@ -96,11 +109,12 @@ export default function Cart() {
           master_id: parseInt(selectedMasterId, 10),
           appointment_date: appDateTime,
           note: note || `Заказ из корзины (${summary.totalQuantity} услуг)`,
+          address: address.trim() || 'Салон (по умолчанию)',
           is_completed: false,
         }),
       });
 
-      if (!appRes.ok) throw new Error('Ошибка при оформлении записи');
+      if (!appRes.ok) throw new Error('Ошибка при оформлении заказа');
       const newApp = await appRes.json();
 
       for (const item of cart) {
@@ -120,6 +134,7 @@ export default function Cart() {
         id: newApp.id_appointment,
         date: selectedDate,
         time: selectedSlot,
+        address: address.trim() || 'Салон (по умолчанию)',
         masterName: chosenMaster ? `${chosenMaster.first_name} ${chosenMaster.second_name || ''}` : 'Мастер',
         total: summary.finalTotal,
         totalDuration: summary.totalDuration,
@@ -128,7 +143,7 @@ export default function Cart() {
 
       await clearCart();
     } catch (err) {
-      setCheckoutError(err.message || 'Произошла ошибка при оформлении записи');
+      setCheckoutError(err.message || 'Произошла ошибка при оформлении заказа');
     } finally {
       setSubmitting(false);
     }
@@ -151,12 +166,18 @@ export default function Cart() {
           <div style={{ textAlign: 'left', background: 'var(--bg-surface-elevated)', padding: '1rem', borderRadius: '4px', marginBottom: '1.5rem', fontSize: '0.85rem' }}>
             <p style={{ marginBottom: '0.4rem' }}>Дата и время: <strong>{checkoutSuccess.date}, {checkoutSuccess.time}</strong></p>
             <p style={{ marginBottom: '0.4rem' }}>Мастер: <strong>{checkoutSuccess.masterName}</strong></p>
+            <p style={{ marginBottom: '0.4rem' }}>Адрес: <strong>{checkoutSuccess.address}</strong></p>
             <p style={{ marginBottom: '0.4rem' }}>Общая длительность: <strong>{checkoutSuccess.totalDuration} мин.</strong></p>
             <p style={{ marginBottom: '0' }}>Итоговая сумма: <strong>{checkoutSuccess.total.toLocaleString()} ₽</strong></p>
           </div>
-          <Link to="/available-services" className="btn btn-primary">
-            Вернуться в каталог
-          </Link>
+          <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'center' }}>
+            <Link to="/profile" className="btn btn-primary">
+              История заказов в кабинете
+            </Link>
+            <Link to="/available-services" className="btn btn-secondary">
+              В каталог
+            </Link>
+          </div>
         </div>
       </div>
     );
@@ -307,6 +328,17 @@ export default function Cart() {
                     </button>
                   ))}
                 </div>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Адрес доставки / выезда</label>
+                <input
+                  type="text"
+                  placeholder="г. Москва, ул. Ленина, д. 10 или 'Салон'"
+                  value={address}
+                  onChange={(e) => setAddress(e.target.value)}
+                  required
+                />
               </div>
 
               <div className="form-group">

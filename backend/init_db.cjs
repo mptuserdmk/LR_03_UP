@@ -43,8 +43,13 @@ async function initDB() {
       role_id INTEGER NOT NULL REFERENCES roles(id_role) ON DELETE RESTRICT,
       email VARCHAR(100) UNIQUE NOT NULL,
       password VARCHAR(255) NOT NULL,
-      discount_id INTEGER REFERENCES discounts(id_discount) ON DELETE SET NULL
+      discount_id INTEGER REFERENCES discounts(id_discount) ON DELETE SET NULL,
+      phone VARCHAR(50),
+      address TEXT
     );
+
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(50);
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS address TEXT;
 
     CREATE TABLE IF NOT EXISTS categories (
       id_category SERIAL PRIMARY KEY,
@@ -76,8 +81,11 @@ async function initDB() {
       master_id INTEGER NOT NULL REFERENCES users(id_user) ON DELETE CASCADE,
       appointment_date TIMESTAMP NOT NULL,
       note TEXT,
+      address TEXT,
       is_completed BOOLEAN NOT NULL DEFAULT FALSE
     );
+
+    ALTER TABLE appointments ADD COLUMN IF NOT EXISTS address TEXT;
 
     CREATE TABLE IF NOT EXISTS appointments_services (
       appointment_id INTEGER NOT NULL REFERENCES appointments(id_appointment) ON DELETE CASCADE,
@@ -149,12 +157,12 @@ async function initDB() {
 
   // 3. Users: Admin, Staff, Master, Client
   await pool.query(`
-    INSERT INTO users (id_user, second_name, first_name, middle_name, role_id, email, password, discount_id) VALUES
-      (1, 'Девлет', 'Максим', 'Керимович', 1, 'isip_m.k.devlet@gmail.com', 'admin123', 4),
-      (2, 'Петров', 'Иван', 'Сергеевич', 4, 'ivan.petrov@mail.ru', '123456', 3),
-      (3, 'Смирнова', 'Анна', 'Игоревна', 3, 'anna.master@salon.ru', '123456', 1),
-      (4, 'Ковалева', 'Елена', 'Викторовна', 2, 'elena.staff@salon.ru', 'staff123', 2),
-      (5, 'Соколов', 'Дмитрий', 'Алексеевич', 3, 'dmitry.barber@salon.ru', '123456', 1)
+    INSERT INTO users (id_user, second_name, first_name, middle_name, role_id, email, password, discount_id, phone, address) VALUES
+      (1, 'Девлет', 'Максим', 'Керимович', 1, 'isip_m.k.devlet@gmail.com', 'admin123', 4, '+7 (999) 111-22-33', 'г. Москва, ул. Арбат, д. 10'),
+      (2, 'Петров', 'Иван', 'Сергеевич', 4, 'ivan.petrov@mail.ru', '123456', 3, '+7 (999) 777-88-99', 'г. Москва, пр-т Мира, д. 24, кв. 15'),
+      (3, 'Смирнова', 'Анна', 'Игоревна', 3, 'anna.master@salon.ru', '123456', 1, '+7 (999) 222-33-44', 'г. Москва, Салон красоты'),
+      (4, 'Ковалева', 'Елена', 'Викторовна', 2, 'elena.staff@salon.ru', 'staff123', 2, '+7 (999) 555-44-33', 'г. Москва, ул. Тверская, д. 5'),
+      (5, 'Соколов', 'Дмитрий', 'Алексеевич', 3, 'dmitry.barber@salon.ru', '123456', 1, '+7 (999) 444-55-66', 'г. Москва, Барбер-зал')
     ON CONFLICT (id_user) DO UPDATE SET
       second_name = EXCLUDED.second_name,
       first_name = EXCLUDED.first_name,
@@ -162,7 +170,9 @@ async function initDB() {
       role_id = EXCLUDED.role_id,
       email = EXCLUDED.email,
       password = EXCLUDED.password,
-      discount_id = EXCLUDED.discount_id;
+      discount_id = EXCLUDED.discount_id,
+      phone = EXCLUDED.phone,
+      address = EXCLUDED.address;
     SELECT setval('users_id_user_seq', (SELECT MAX(id_user) FROM users));
   `);
 

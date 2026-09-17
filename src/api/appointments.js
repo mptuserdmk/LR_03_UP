@@ -7,6 +7,13 @@ export async function getAppointments() {
   return await response.json();
 }
 
+// Получить все заказы конкретного пользователя
+export async function getUserAppointments(userId) {
+  const response = await fetch(`${API_URL}/user/${userId}`);
+  if (!response.ok) throw new Error('Ошибка при получении заказов пользователя');
+  return await response.json();
+}
+
 // Получить запись по ID
 export async function getAppointmentById(id) {
   const response = await fetch(`${API_URL}/${id}`);

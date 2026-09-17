@@ -12,6 +12,7 @@ import UsersList from './components/UsersList';
 import Services from './components/Services';
 import Cart from './components/Cart';
 import Reviews from './components/Reviews';
+import Profile from './components/Profile';
 
 import AdminPanel from './AdminPanel';
 import Menu from './Menu';
@@ -38,6 +39,7 @@ function App() {
               <Route path="/available-services" element={<Services />} />
               <Route path="/cart" element={<Cart />} />
               <Route path="/reviews" element={<Reviews />} />
+              <Route path="/profile" element={<Profile />} />
 
               {/* Admin / Staff Routes */}
               <Route path="/categories" element={<CategoriesList />} />

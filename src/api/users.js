@@ -95,3 +95,45 @@ export async function resetPassword(email, code, new_password) {
   }
   return data;
 }
+
+// Регистрация нового пользователя
+export async function registerUser(userData) {
+  const response = await fetch(`${AUTH_URL}/register`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(userData),
+  });
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(data.error || 'Ошибка при регистрации');
+  }
+  return data;
+}
+
+// Редактирование профиля
+export async function updateProfile(id, profileData) {
+  const response = await fetch(`${API_URL}/profile/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(profileData),
+  });
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(data.error || 'Ошибка при обновлении профиля');
+  }
+  return data;
+}
+
+// Изменение пароля из личного кабинета
+export async function changePassword(id, passwords) {
+  const response = await fetch(`${API_URL}/change-password/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(passwords),
+  });
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(data.error || 'Ошибка при смене пароля');
+  }
+  return data;
+}
