@@ -1,85 +1,53 @@
 import { useEffect, useState, useMemo } from 'react';
 import { getServices } from '../api/services';
 import { getServicesCategories } from '../api/services_categories';
-import { getСategories } from '../api/categories';
+import { getСategories, createCategory } from '../api/categories';
 import { getDiscounts } from '../api/discounts';
-import { getUsers } from '../api/users';
-import { getReviews, createReview } from '../api/reviews';
 import { useAuth } from '../context/AuthContext';
 import { useCart } from '../context/CartContext';
-import { NavLink, useSearchParams } from 'react-router-dom';
+import { NavLink } from 'react-router-dom';
 
 export default function Services() {
   const { user } = useAuth();
-  const { addToCart } = useCart();
-  const [searchParams] = useSearchParams();
+  const { addToCart, cart } = useCart();
 
   const [services, setServices] = useState([]);
   const [categories, setCategories] = useState([]);
   const [serviceCategories, setServiceCategories] = useState([]);
   const [discounts, setDiscounts] = useState([]);
-  const [masters, setMasters] = useState([]);
-  const [reviews, setReviews] = useState([]);
   const [selectedCategoryIds, setSelectedCategoryIds] = useState([]);
+  const [onlyDiscounted, setOnlyDiscounted] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [maxPrice, setMaxPrice] = useState(10000);
   const [sortBy, setSortBy] = useState('popular');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [addMessage, setAddMessage] = useState(null);
+  const [toastMessage, setToastMessage] = useState(null);
 
-  // Reviews expansion state per service ID
-  const [expandedReviews, setExpandedReviews] = useState({});
+  // New Category inline form for Admin
+  const [newCatTitle, setNewCatTitle] = useState('');
+  const [addingCategory, setAddingCategory] = useState(false);
+  const [catError, setCatError] = useState('');
 
-  // Quick Review Modal State
-  const [reviewService, setReviewService] = useState(null);
-  const [reviewRating, setReviewRating] = useState(5);
-  const [reviewComment, setReviewComment] = useState('');
-  const [reviewSubmitting, setReviewSubmitting] = useState(false);
-  const [reviewError, setReviewError] = useState(null);
-  const [reviewSuccess, setReviewSuccess] = useState(null);
-  const [reviewCooldown, setReviewCooldown] = useState(0);
-
-  // Quick Time-Slot Booking Modal
-  const [quickBookService, setQuickBookService] = useState(null);
-  const [selectedDate, setSelectedDate] = useState(() => {
-    const d = new Date();
-    d.setDate(d.getDate() + 1);
-    return d.toISOString().split('T')[0];
-  });
-  const [selectedSlot, setSelectedSlot] = useState('11:30');
-  const [selectedMasterId, setSelectedMasterId] = useState('');
-  const [quickBookSuccess, setQuickBookSuccess] = useState(null);
-  const [quickBookSubmitting, setQuickBookSubmitting] = useState(false);
-
-  const timeSlots = ['09:00', '10:00', '11:30', '13:00', '14:30', '16:00', '17:30', '19:00', '20:30'];
+  const isStaffOrAdmin = user && (user.role_id === 1 || user.role_id === 2 || user.role_title === 'Главный администратор' || user.role_title?.includes('Сотрудник'));
 
   const loadData = async () => {
     try {
       setLoading(true);
       setError(null);
-      const [servicesData, categoriesData, linksData, discountsData, usersData, reviewsData] = await Promise.all([
+      const [servicesData, categoriesData, linksData, discountsData] = await Promise.all([
         getServices(),
         getСategories(),
         getServicesCategories(),
         getDiscounts(),
-        getUsers(),
-        getReviews(),
       ]);
 
       setServices(servicesData);
       setCategories(categoriesData);
       setServiceCategories(linksData);
       setDiscounts(discountsData);
-      setReviews(reviewsData);
-
-      const staffMasters = usersData.filter((u) => u.role_id === 3 || u.role_title === 'Мастер');
-      setMasters(staffMasters);
-      if (staffMasters.length > 0) {
-        setSelectedMasterId(String(staffMasters[0].id_user));
-      }
     } catch (err) {
-      setError(err.message || 'Ошибка загрузки данных');
+      setError(err.message || 'Ошибка загрузки данных каталога с сервера');
     } finally {
       setLoading(false);
     }
@@ -89,23 +57,6 @@ export default function Services() {
     loadData();
   }, []);
 
-  // Handle URL category query param
-  useEffect(() => {
-    const catParam = searchParams.get('category');
-    if (catParam) {
-      setSelectedCategoryIds([Number(catParam)]);
-    }
-  }, [searchParams]);
-
-  // Cooldown countdown timer
-  useEffect(() => {
-    if (reviewCooldown <= 0) return;
-    const timer = setInterval(() => {
-      setReviewCooldown((prev) => (prev > 0 ? prev - 1 : 0));
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [reviewCooldown]);
-
   const userDiscount = useMemo(() => {
     if (!user || !user.discount_id) return null;
     const found = discounts.find((d) => String(d.id_discount) === String(user.discount_id));
@@ -113,12 +64,18 @@ export default function Services() {
   }, [user, discounts]);
 
   const getServiceDiscount = (service) => {
+    if (service.discount_percentage && service.discount_percentage > 0) {
+      return { percentage: service.discount_percentage, title: service.discount_title };
+    }
     if (!service.discount_id) return null;
     const found = discounts.find((d) => String(d.id_discount) === String(service.discount_id));
     return found && found.percentage > 0 ? found : null;
   };
 
   const getServiceCategories = (service) => {
+    if (service.category_ids && Array.isArray(service.category_ids)) {
+      return categories.filter((c) => service.category_ids.includes(c.id_category));
+    }
     return serviceCategories
       .filter((link) => String(link.service_id) === String(service.id_service))
       .map((link) => categories.find((c) => String(c.id_category) === String(link.category_id)))
@@ -138,114 +95,74 @@ export default function Services() {
     return { finalPrice, effectivePct, hasDiscount: true };
   };
 
-  const handleCategoryToggle = (categoryId) => {
+  const handleCategoryCheckboxChange = (categoryId) => {
     setSelectedCategoryIds((prev) =>
       prev.includes(categoryId) ? prev.filter((id) => id !== categoryId) : [...prev, categoryId]
     );
   };
 
-  // Map reviews by service_id
-  const reviewsByService = useMemo(() => {
-    const map = {};
-    for (const r of reviews) {
-      if (r.service_id) {
-        if (!map[r.service_id]) map[r.service_id] = [];
-        map[r.service_id].push(r);
-      }
-    }
-    return map;
-  }, [reviews]);
-
-  const getServiceStats = (serviceId) => {
-    const servReviews = reviewsByService[serviceId] || [];
-    if (servReviews.length === 0) {
-      return { count: 0, avg: null };
-    }
-    const sum = servReviews.reduce((acc, r) => acc + (r.rating || 5), 0);
-    return { count: servReviews.length, avg: (sum / servReviews.length).toFixed(1) };
-  };
-
-  const toggleReviewsExpand = (serviceId) => {
-    setExpandedReviews((prev) => ({
-      ...prev,
-      [serviceId]: !prev[serviceId],
-    }));
-  };
-
-  const openReviewModal = (service) => {
-    setReviewService(service);
-    setReviewRating(5);
-    setReviewComment('');
-    setReviewError(null);
-    setReviewSuccess(null);
-  };
-
-  const handleReviewSubmit = async (e) => {
+  const handleAddCategory = async (e) => {
     e.preventDefault();
-    if (!user) {
-      setReviewError('Для публикации отзыва необходимо авторизоваться');
+    if (!newCatTitle.trim()) {
+      setCatError('Введите название');
       return;
     }
-    if (!reviewComment.trim()) {
-      setReviewError('Пожалуйста, напишите текст отзыва');
-      return;
-    }
-
-    setReviewSubmitting(true);
-    setReviewError(null);
-    setReviewSuccess(null);
-
+    setAddingCategory(true);
+    setCatError('');
     try {
-      await createReview({
-        user_id: user.id_user,
-        service_id: reviewService.id_service,
-        rating: reviewRating,
-        comment: reviewComment.trim(),
-      });
-      setReviewSuccess('Спасибо! Ваш отзыв опубликован.');
-      setReviewComment('');
-      setReviewCooldown(180);
-
-      // Auto expand reviews for this service so user immediately sees their review
-      setExpandedReviews((prev) => ({
-        ...prev,
-        [reviewService.id_service]: true,
-      }));
-
-      // Reload reviews
-      const updatedReviews = await getReviews();
-      setReviews(updatedReviews);
-
-      setTimeout(() => {
-        setReviewService(null);
-        setReviewSuccess(null);
-      }, 1500);
+      const created = await createCategory({ title: newCatTitle.trim() });
+      setCategories((prev) => [...prev, created]);
+      setNewCatTitle('');
+      setToastMessage(`Категория «${created.title}» добавлена и сразу доступна в Aside!`);
+      setTimeout(() => setToastMessage(null), 4000);
     } catch (err) {
-      if (err.message && err.message.includes('Подождите')) {
-        const match = err.message.match(/(\d+)\s*сек/);
-        const secs = match ? parseInt(match[1], 10) : 180;
-        setReviewCooldown(secs);
-        setReviewError(`Антиспам-защита: повторный отзыв возможен через ${secs} сек.`);
-      } else {
-        setReviewError(err.message || 'Ошибка сохранения отзыва');
-      }
+      setCatError(err.message || 'Ошибка создания категории');
     } finally {
-      setReviewSubmitting(false);
+      setAddingCategory(false);
     }
+  };
+
+  const handleAddToCart = async (service) => {
+    try {
+      await addToCart(service);
+      setToastMessage(`«${service.title}» добавлена в корзину`);
+      setTimeout(() => setToastMessage(null), 3000);
+    } catch {
+      setToastMessage('Ошибка при добавлении в корзину');
+      setTimeout(() => setToastMessage(null), 3000);
+    }
+  };
+
+  const getItemCartQty = (serviceId) => {
+    const found = cart.find((item) => Number(item.service_id) === Number(serviceId) || Number(item.id_service) === Number(serviceId));
+    return found ? found.quantity : 0;
   };
 
   const filteredServices = useMemo(() => {
     let result = services;
 
+    // Filter by Category Checkboxes
     if (selectedCategoryIds.length > 0) {
       result = result.filter((service) => {
-        const serviceCats = serviceCategories
-          .filter((link) => String(link.service_id) === String(service.id_service))
-          .map((link) => link.category_id);
-        return selectedCategoryIds.some((selectedId) => serviceCats.includes(selectedId));
+        const serviceCatIds = (service.category_ids && service.category_ids.length > 0)
+          ? service.category_ids
+          : serviceCategories
+              .filter((link) => String(link.service_id) === String(service.id_service))
+              .map((link) => link.category_id);
+
+        return selectedCategoryIds.some((selectedId) => serviceCatIds.includes(selectedId));
       });
     }
 
+    // Filter by Discount Only
+    if (onlyDiscounted) {
+      result = result.filter((service) => {
+        const servDisc = getServiceDiscount(service);
+        return servDisc && servDisc.percentage > 0;
+      });
+    }
+
+    // Search query filter (tolerant text search)
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase().trim();
       const tokens = q.split(/\s+/).filter(Boolean);
@@ -253,7 +170,7 @@ export default function Services() {
       result = result.filter((service) => {
         const serviceCats = getServiceCategories(service).map((c) => c.title.toLowerCase()).join(' ');
         const servicePriceStr = String(service.price);
-        const serviceDurationStr = `${service.duration} мин минут`;
+        const serviceDurationStr = `${service.duration} мин`;
         const searchableText = `${service.title} ${service.description || ''} ${serviceCats} ${servicePriceStr} ${serviceDurationStr}`.toLowerCase();
 
         return tokens.every((token) => {
@@ -267,109 +184,26 @@ export default function Services() {
       });
     }
 
+    // Max price filter
     result = result.filter((service) => {
       const servDisc = getServiceDiscount(service);
       const { finalPrice } = calculateFinalPrice(service.price, servDisc, userDiscount);
       return finalPrice <= maxPrice;
     });
 
+    // Sorting
     return [...result].sort((a, b) => {
-      if (sortBy === 'price-asc') {
-        return parseFloat(a.price) - parseFloat(b.price);
-      }
-      if (sortBy === 'price-desc') {
-        return parseFloat(b.price) - parseFloat(a.price);
-      }
-      if (sortBy === 'duration') {
-        return (a.duration || 30) - (b.duration || 30);
-      }
-      if (sortBy === 'rating') {
-        const ratingA = parseFloat(getServiceStats(a.id_service).avg) || 0;
-        const ratingB = parseFloat(getServiceStats(b.id_service).avg) || 0;
-        return ratingB - ratingA;
+      if (sortBy === 'price-asc') return parseFloat(a.price) - parseFloat(b.price);
+      if (sortBy === 'price-desc') return parseFloat(b.price) - parseFloat(a.price);
+      if (sortBy === 'duration') return (a.duration || 30) - (b.duration || 30);
+      if (sortBy === 'discount') {
+        const discA = getServiceDiscount(a)?.percentage || 0;
+        const discB = getServiceDiscount(b)?.percentage || 0;
+        return discB - discA;
       }
       return 0;
     });
-  }, [services, selectedCategoryIds, searchQuery, maxPrice, sortBy, serviceCategories, categories, discounts, userDiscount, reviewsByService]);
-
-  const handleAddToCart = async (service) => {
-    try {
-      await addToCart(service);
-      setAddMessage(`«${service.title}» добавлена в корзину`);
-      setTimeout(() => setAddMessage(null), 3000);
-    } catch {
-      setAddMessage('Ошибка при добавлении в корзину');
-    }
-  };
-
-  const handleQuickBookSubmit = async (e) => {
-    e.preventDefault();
-    if (!user) {
-      alert('Для онлайн-записи необходимо войти в систему.');
-      return;
-    }
-    setQuickBookSubmitting(true);
-    try {
-      const appointmentDateTime = `${selectedDate}T${selectedSlot}:00`;
-      const servDisc = getServiceDiscount(quickBookService);
-      const { finalPrice } = calculateFinalPrice(quickBookService.price, servDisc, userDiscount);
-
-      const appRes = await fetch('http://localhost:3001/api/appointments', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          user_id: user.id_user,
-          master_id: selectedMasterId ? Number(selectedMasterId) : null,
-          appointment_date: appointmentDateTime,
-          note: `Экспресс-запись на услугу «${quickBookService.title}»`,
-          is_completed: false,
-        }),
-      });
-      const newApp = await appRes.json();
-
-      await fetch('http://localhost:3001/api/appointments-services', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          appointment_id: newApp.id_appointment,
-          service_id: quickBookService.id_service,
-          quantity: 1,
-        }),
-      });
-
-      const chosenMaster = masters.find((m) => String(m.id_user) === String(selectedMasterId));
-      setQuickBookSuccess({
-        date: selectedDate,
-        time: selectedSlot,
-        masterName: chosenMaster ? `${chosenMaster.first_name} ${chosenMaster.second_name || ''}` : 'Любой свободный мастер',
-        serviceTitle: quickBookService.title,
-        finalPrice,
-      });
-    } catch (err) {
-      alert('Ошибка при оформлении записи: ' + err.message);
-    } finally {
-      setQuickBookSubmitting(false);
-    }
-  };
-
-  if (loading) {
-    return (
-      <div className="page-container" style={{ textAlign: 'center', paddingTop: '4rem' }}>
-        <p style={{ color: 'var(--text-muted)' }}>Загрузка каталога услуг...</p>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="page-container" style={{ textAlign: 'center', paddingTop: '4rem' }}>
-        <p style={{ color: 'var(--accent-danger)' }}>{error}</p>
-        <button onClick={loadData} className="btn btn-secondary" style={{ marginTop: '1rem' }}>
-          Повторить попытку
-        </button>
-      </div>
-    );
-  }
+  }, [services, selectedCategoryIds, onlyDiscounted, searchQuery, maxPrice, sortBy, serviceCategories, categories, discounts, userDiscount]);
 
   return (
     <div className="page-container">
@@ -378,512 +212,297 @@ export default function Services() {
         <div>
           <h1 className="page-title">Каталог услуг</h1>
           <p className="page-subtitle">
-            Профессиональные услуги салона с прозрачными ценами, отзывами гостей и онлайн-записью
+            Профессиональные услуги салона, прозрачные цены и гарантированные скидки
           </p>
         </div>
-        <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
-          <NavLink to="/reviews" className="btn btn-secondary btn-sm" style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-            <span>★ Все отзывы салона</span>
-            <span className="badge badge-primary" style={{ padding: '0.15rem 0.4rem', fontSize: '0.7rem' }}>{reviews.length}</span>
-          </NavLink>
-          {userDiscount && (
-            <div className="badge badge-success" style={{ padding: '0.4rem 0.8rem' }}>
-              Персональная скидка: {userDiscount.percentage}%
-            </div>
-          )}
-        </div>
+        {userDiscount && (
+          <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+            Персональный купон: <strong>{userDiscount.title} ({userDiscount.percentage}%)</strong>
+          </div>
+        )}
       </div>
 
-      {addMessage && (
-        <div style={{ background: 'var(--bg-surface-elevated)', border: '1px solid var(--border-strong)', padding: '0.75rem 1rem', borderRadius: '4px', marginBottom: '1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <span>{addMessage}</span>
+      {/* Global Toast Banner */}
+      {toastMessage && (
+        <div className="catalog-toast-banner">
+          <span>{toastMessage}</span>
           <NavLink to="/cart" className="btn btn-primary btn-sm">Перейти в корзину</NavLink>
         </div>
       )}
 
-      {/* Filter and Search Bar */}
-      <div className="services-filter-bar">
-        <div>
-          <input
-            type="text"
-            placeholder="Поиск по названию, описанию или категории..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-          />
+      {/* Loading state message */}
+      {loading && (
+        <div className="catalog-loading-box">
+          <div className="spinner-slate"></div>
+          <p>Загрузка каталога услуг с сервера API...</p>
         </div>
-        <div>
-          <select value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
-            <option value="popular">По умолчанию</option>
-            <option value="rating">По рейтингу (высокий)</option>
-            <option value="price-asc">Сначала недорогие</option>
-            <option value="price-desc">Сначала премиум</option>
-            <option value="duration">По времени (быстрые)</option>
-          </select>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>До: {maxPrice} ₽</span>
-          <input
-            type="range"
-            min="500"
-            max="10000"
-            step="100"
-            value={maxPrice}
-            onChange={(e) => setMaxPrice(Number(e.target.value))}
-          />
-        </div>
-      </div>
+      )}
 
-      {/* Category Tabs */}
-      <div className="admin-nav-bar" style={{ marginBottom: '1.5rem' }}>
-        <button
-          type="button"
-          className={`admin-nav-tab ${selectedCategoryIds.length === 0 ? 'active' : ''}`}
-          onClick={() => setSelectedCategoryIds([])}
-        >
-          Все ({services.length})
-        </button>
-        {categories.map((cat) => {
-          const isSelected = selectedCategoryIds.includes(cat.id_category);
-          return (
-            <button
-              key={cat.id_category}
-              type="button"
-              className={`admin-nav-tab ${isSelected ? 'active' : ''}`}
-              onClick={() => handleCategoryToggle(cat.id_category)}
-            >
-              {cat.title}
-            </button>
-          );
-        })}
-      </div>
-
-      {/* Services Grid */}
-      {filteredServices.length === 0 ? (
-        <div style={{ textAlign: 'center', padding: '3rem 1rem', background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', borderRadius: '6px' }}>
-          <p style={{ color: 'var(--text-muted)', marginBottom: '1rem' }}>По вашему запросу услуг не найдено</p>
-          <button
-            type="button"
-            className="btn btn-secondary btn-sm"
-            onClick={() => {
-              setSearchQuery('');
-              setSelectedCategoryIds([]);
-              setMaxPrice(10000);
-            }}
-          >
-            Сбросить фильтры
+      {/* Error state message */}
+      {error && !loading && (
+        <div className="catalog-error-box">
+          <p className="error-title">Ошибка при запросе к серверу</p>
+          <p className="error-desc">{error}</p>
+          <button onClick={loadData} className="btn btn-secondary btn-sm" style={{ marginTop: '0.75rem' }}>
+            Повторить попытку
           </button>
         </div>
-      ) : (
-        <div className="services-grid">
-          {filteredServices.map((service) => {
-            const servDisc = getServiceDiscount(service);
-            const { finalPrice, effectivePct, hasDiscount } = calculateFinalPrice(
-              service.price,
-              servDisc,
-              userDiscount
-            );
-            const serviceCats = getServiceCategories(service);
-            const stats = getServiceStats(service.id_service);
-            const servReviewsList = reviewsByService[service.id_service] || [];
-            const isExpanded = !!expandedReviews[service.id_service];
-
-            return (
-              <div key={service.id_service} className="service-card">
-                <div className="service-card-media">
-                  {service.image_url ? (
-                    <img
-                      src={service.image_url}
-                      alt={service.title}
-                      className="service-card-img"
-                      onError={(e) => {
-                        e.target.style.display = 'none';
-                        if (e.target.nextSibling) {
-                          e.target.nextSibling.style.display = 'flex';
-                        }
-                      }}
-                    />
-                  ) : null}
-                  <div
-                    className="service-card-placeholder"
-                    style={{ display: service.image_url ? 'none' : 'flex' }}
-                  >
-                    <span>{serviceCats[0]?.title || 'УСЛУГА САЛОНА'}</span>
-                  </div>
-                </div>
-
-                <div className="service-card-body">
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.5rem' }}>
-                    <h3 className="service-card-title">{service.title}</h3>
-                    {hasDiscount && (
-                      <span className="badge badge-warning">-{effectivePct}%</span>
-                    )}
-                  </div>
-
-                  {/* Service Rating Summary */}
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', margin: '0.35rem 0 0.5rem', fontSize: '0.8rem' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                      <span style={{ color: 'var(--accent-silver)', fontWeight: '700' }}>
-                        {stats.avg ? `★ ${stats.avg}` : '★ 5.0'}
-                      </span>
-                      <span style={{ color: 'var(--text-dim)', fontSize: '0.75rem' }}>
-                        {stats.count > 0 ? `(${stats.count} ${stats.count === 1 ? 'отзыв' : stats.count < 5 ? 'отзыва' : 'отзывов'})` : '(нет отзывов)'}
-                      </span>
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={() => toggleReviewsExpand(service.id_service)}
-                      style={{
-                        background: 'transparent',
-                        border: 'none',
-                        color: isExpanded ? 'var(--text-main)' : 'var(--text-muted)',
-                        cursor: 'pointer',
-                        fontSize: '0.75rem',
-                        textDecoration: 'underline',
-                        padding: '0.1rem 0.3rem',
-                      }}
-                    >
-                      {isExpanded ? 'Скрыть отзывы ▲' : `Отзывы (${stats.count}) ▼`}
-                    </button>
-                  </div>
-
-                  <p className="service-card-desc">{service.description || 'Профессиональная услуга мастеров салона.'}</p>
-
-                  <div className="service-card-meta">
-                    <div>
-                      <span className="service-price">{finalPrice.toLocaleString()} ₽</span>
-                      {hasDiscount && (
-                        <span style={{ fontSize: '0.75rem', color: 'var(--text-dim)', textDecoration: 'line-through', marginLeft: '0.4rem' }}>
-                          {parseFloat(service.price).toLocaleString()} ₽
-                        </span>
-                      )}
-                    </div>
-                    <span className="service-duration">{service.duration || 30} мин.</span>
-                  </div>
-
-                  {/* Primary Card Actions */}
-                  <div className="service-card-actions">
-                    <button
-                      type="button"
-                      className="btn btn-secondary btn-sm"
-                      onClick={() => handleAddToCart(service)}
-                    >
-                      В корзину
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-primary btn-sm"
-                      onClick={() => {
-                        setQuickBookService(service);
-                        setQuickBookSuccess(null);
-                      }}
-                    >
-                      Записаться
-                    </button>
-                  </div>
-
-                  {/* Secondary Reviews Quick Action */}
-                  <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.6rem', paddingTop: '0.6rem', borderTop: '1px solid var(--border-subtle)' }}>
-                    <button
-                      type="button"
-                      className="btn btn-secondary btn-sm"
-                      style={{ flex: 1, fontSize: '0.75rem', padding: '0.35rem 0.5rem' }}
-                      onClick={() => openReviewModal(service)}
-                    >
-                      ✍ Оставить отзыв
-                    </button>
-                    <NavLink
-                      to={`/reviews?serviceId=${service.id_service}`}
-                      className="btn btn-sm"
-                      style={{
-                        background: 'var(--bg-input)',
-                        color: 'var(--text-muted)',
-                        border: '1px solid var(--border-subtle)',
-                        fontSize: '0.75rem',
-                        padding: '0.35rem 0.5rem',
-                        textDecoration: 'none',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                      }}
-                    >
-                      Все отзывы
-                    </NavLink>
-                  </div>
-
-                  {/* Expandable Service Reviews Section */}
-                  {isExpanded && (
-                    <div className="service-card-reviews-panel" style={{ marginTop: '0.85rem', paddingTop: '0.75rem', borderTop: '1px solid var(--border-strong)', background: 'var(--bg-surface-elevated)', padding: '0.75rem', borderRadius: '4px' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-                        <span style={{ fontSize: '0.8rem', fontWeight: '600', color: 'var(--text-main)' }}>
-                          Отзывы к услуге ({servReviewsList.length})
-                        </span>
-                        <button
-                          type="button"
-                          className="btn btn-secondary btn-sm"
-                          style={{ padding: '0.15rem 0.4rem', fontSize: '0.7rem' }}
-                          onClick={() => openReviewModal(service)}
-                        >
-                          + Написать
-                        </button>
-                      </div>
-
-                      {servReviewsList.length === 0 ? (
-                        <div style={{ textAlign: 'center', padding: '0.75rem 0.25rem', fontSize: '0.75rem', color: 'var(--text-dim)' }}>
-                          Пока нет отзывов к этой услуге.
-                          <div style={{ marginTop: '0.35rem' }}>
-                            <button
-                              type="button"
-                              className="btn btn-primary btn-sm"
-                              style={{ fontSize: '0.7rem', padding: '0.2rem 0.5rem' }}
-                              onClick={() => openReviewModal(service)}
-                            >
-                              Будьте первым!
-                            </button>
-                          </div>
-                        </div>
-                      ) : (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', maxHeight: '180px', overflowY: 'auto' }}>
-                          {servReviewsList.map((rev) => (
-                            <div
-                              key={rev.id_review}
-                              style={{
-                                background: 'var(--bg-surface)',
-                                border: '1px solid var(--border-subtle)',
-                                borderRadius: '4px',
-                                padding: '0.5rem 0.6rem',
-                                fontSize: '0.75rem',
-                              }}
-                            >
-                              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.2rem' }}>
-                                <strong style={{ color: 'var(--text-main)' }}>
-                                  {rev.first_name ? `${rev.first_name} ${rev.second_name || ''}` : rev.author_name || 'Клиент'}
-                                </strong>
-                                <span style={{ color: 'var(--accent-silver)', fontWeight: '700' }}>
-                                  {'★'.repeat(rev.rating)}
-                                </span>
-                              </div>
-                              <p style={{ color: 'var(--text-muted)', margin: '0 0 0.2rem', lineHeight: '1.3' }}>
-                                {rev.comment}
-                              </p>
-                              <span style={{ color: 'var(--text-dim)', fontSize: '0.65rem' }}>
-                                {rev.created_at ? new Date(rev.created_at).toLocaleDateString('ru-RU') : ''}
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
       )}
 
-      {/* Leave Review Modal */}
-      {reviewService && (
-        <div className="modal-backdrop">
-          <div className="modal-box">
-            <div className="modal-header">
-              <h3 className="modal-title">Отзыв об услуге</h3>
-              <button
-                type="button"
-                className="modal-close-btn"
-                onClick={() => setReviewService(null)}
-              >
-                ✕
-              </button>
-            </div>
-
-            {reviewSuccess ? (
-              <div style={{ textAlign: 'center', padding: '1.5rem 0' }}>
-                <div className="badge badge-success" style={{ marginBottom: '0.75rem', display: 'inline-block' }}>Успешно</div>
-                <h4 style={{ color: 'var(--text-main)', marginBottom: '0.5rem' }}>{reviewService.title}</h4>
-                <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>{reviewSuccess}</p>
-              </div>
-            ) : (
-              <form onSubmit={handleReviewSubmit}>
-                <div style={{ marginBottom: '1rem', paddingBottom: '0.75rem', borderBottom: '1px solid var(--border-subtle)' }}>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                    Выбранная услуга
-                  </div>
-                  <div style={{ fontWeight: '600', color: 'var(--text-main)', fontSize: '1rem', marginTop: '0.2rem' }}>
-                    {reviewService.title}
-                  </div>
-                </div>
-
-                {reviewError && (
-                  <div className="badge badge-danger" style={{ display: 'block', marginBottom: '0.75rem', padding: '0.4rem' }}>
-                    {reviewError}
-                  </div>
-                )}
-
-                {reviewCooldown > 0 && (
-                  <div style={{ background: 'rgba(245, 158, 11, 0.1)', border: '1px solid rgba(245, 158, 11, 0.3)', padding: '0.5rem', borderRadius: '4px', marginBottom: '0.75rem', fontSize: '0.75rem', color: 'var(--accent-warning)' }}>
-                    Повторный отзыв возможен через: <strong>{reviewCooldown} сек.</strong>
-                  </div>
-                )}
-
-                <div className="form-group">
-                  <label className="form-label">Ваша оценка</label>
-                  <div style={{ display: 'flex', gap: '0.5rem' }}>
-                    {[1, 2, 3, 4, 5].map((star) => (
-                      <button
-                        key={star}
-                        type="button"
-                        style={{
-                          flex: 1,
-                          background: reviewRating >= star ? 'var(--accent-silver)' : 'var(--bg-input)',
-                          color: reviewRating >= star ? '#0c0e12' : 'var(--text-muted)',
-                          border: '1px solid var(--border-subtle)',
-                          borderRadius: '4px',
-                          padding: '0.4rem 0.2rem',
-                          cursor: 'pointer',
-                          fontSize: '0.9rem',
-                          fontWeight: '700',
-                          textAlign: 'center',
-                        }}
-                        onClick={() => setReviewRating(star)}
-                      >
-                        ★ {star}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="form-group">
-                  <label className="form-label">Текст отзыва</label>
-                  <textarea
-                    rows={4}
-                    placeholder={`Поделитесь впечатлением от услуги «${reviewService.title}»...`}
-                    value={reviewComment}
-                    onChange={(e) => setReviewComment(e.target.value)}
-                    required
-                  />
-                </div>
-
-                <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1.25rem' }}>
-                  <button
-                    type="submit"
-                    className="btn btn-primary"
-                    style={{ flex: 1 }}
-                    disabled={reviewSubmitting || reviewCooldown > 0}
-                  >
-                    {reviewSubmitting ? 'Отправка...' : 'Опубликовать отзыв'}
-                  </button>
+      {/* Main Two-Column Layout with ASIDE on the left */}
+      {!loading && !error && (
+        <div className="catalog-layout">
+          {/* ASIDE: Categories with Checkboxes & Filters */}
+          <aside className="catalog-aside">
+            <div className="aside-section">
+              <div className="aside-header">
+                <h3 className="aside-title">Категории</h3>
+                {selectedCategoryIds.length > 0 && (
                   <button
                     type="button"
-                    className="btn btn-secondary"
-                    onClick={() => setReviewService(null)}
+                    className="aside-reset-btn"
+                    onClick={() => setSelectedCategoryIds([])}
                   >
-                    Отмена
+                    Сбросить
                   </button>
-                </div>
-              </form>
-            )}
-          </div>
-        </div>
-      )}
+                )}
+              </div>
 
-      {/* Quick Booking Modal */}
-      {quickBookService && (
-        <div className="modal-backdrop">
-          <div className="modal-box">
-            <div className="modal-header">
-              <h3 className="modal-title">Онлайн-запись</h3>
-              <button
-                type="button"
-                className="modal-close-btn"
-                onClick={() => setQuickBookService(null)}
-              >
-                ✕
-              </button>
+              {/* Checkbox: All categories */}
+              <label className="category-checkbox-label">
+                <input
+                  type="checkbox"
+                  checked={selectedCategoryIds.length === 0}
+                  onChange={() => setSelectedCategoryIds([])}
+                />
+                <span className="checkbox-custom"></span>
+                <span className="category-label-text">Все категории</span>
+                <span className="category-count">{services.length}</span>
+              </label>
+
+              {/* Dynamic Categories list with Checkboxes */}
+              <div className="categories-checkbox-list">
+                {categories.map((cat) => {
+                  const isChecked = selectedCategoryIds.includes(cat.id_category);
+                  const count = services.filter((s) => {
+                    const catIds = s.category_ids || serviceCategories.filter((sc) => sc.service_id === s.id_service).map((sc) => sc.category_id);
+                    return catIds.includes(cat.id_category);
+                  }).length;
+
+                  return (
+                    <label key={cat.id_category} className={`category-checkbox-label ${isChecked ? 'active' : ''}`}>
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        onChange={() => handleCategoryCheckboxChange(cat.id_category)}
+                      />
+                      <span className="checkbox-custom"></span>
+                      <span className="category-label-text">{cat.title}</span>
+                      <span className="category-count">{count}</span>
+                    </label>
+                  );
+                })}
+              </div>
+
+              {/* Admin direct category creation inside aside */}
+              {isStaffOrAdmin && (
+                <div className="aside-admin-box">
+                  <div className="aside-admin-title">+ Добавить категорию</div>
+                  <form onSubmit={handleAddCategory} className="aside-admin-form">
+                    <input
+                      type="text"
+                      placeholder="Название категории..."
+                      value={newCatTitle}
+                      onChange={(e) => setNewCatTitle(e.target.value)}
+                      disabled={addingCategory}
+                    />
+                    <button type="submit" className="btn btn-primary btn-sm" disabled={addingCategory || !newCatTitle.trim()}>
+                      {addingCategory ? '...' : 'Добавить'}
+                    </button>
+                  </form>
+                  {catError && <div className="aside-admin-error">{catError}</div>}
+                </div>
+              )}
             </div>
 
-            {quickBookSuccess ? (
-              <div style={{ textAlign: 'center', padding: '1rem 0' }}>
-                <div className="badge badge-success" style={{ marginBottom: '1rem', display: 'inline-block' }}>Запись подтверждена</div>
-                <h4 style={{ color: 'var(--text-main)', marginBottom: '0.5rem' }}>{quickBookSuccess.serviceTitle}</h4>
-                <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: '0.25rem' }}>
-                  Дата и время: <strong>{quickBookSuccess.date}, {quickBookSuccess.time}</strong>
-                </p>
-                <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: '0.25rem' }}>
-                  Мастер: <strong>{quickBookSuccess.masterName}</strong>
-                </p>
-                <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: '1.5rem' }}>
-                  Сумма к оплате: <strong>{quickBookSuccess.finalPrice} ₽</strong>
+            {/* Aside Special Filters */}
+            <div className="aside-section">
+              <h3 className="aside-title">Фильтр скидок</h3>
+              <label className="category-checkbox-label">
+                <input
+                  type="checkbox"
+                  checked={onlyDiscounted}
+                  onChange={(e) => setOnlyDiscounted(e.target.checked)}
+                />
+                <span className="checkbox-custom"></span>
+                <span className="category-label-text">Товары со скидкой</span>
+                <span className="category-count">
+                  {services.filter((s) => (getServiceDiscount(s)?.percentage || 0) > 0).length}
+                </span>
+              </label>
+            </div>
+
+            {/* Aside Price Slider */}
+            <div className="aside-section">
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                <h3 className="aside-title">Макс. стоимость</h3>
+                <span style={{ fontSize: '0.8rem', color: 'var(--text-main)', fontWeight: '600' }}>{maxPrice.toLocaleString()} ₽</span>
+              </div>
+              <input
+                type="range"
+                min="500"
+                max="10000"
+                step="250"
+                value={maxPrice}
+                onChange={(e) => setMaxPrice(Number(e.target.value))}
+                style={{ width: '100%' }}
+              />
+            </div>
+          </aside>
+
+          {/* MAIN CONTENT: Top Toolbar & Services Grid */}
+          <main className="catalog-main">
+            <div className="catalog-toolbar">
+              <div className="search-box">
+                <input
+                  type="text"
+                  placeholder="Поиск по названию или описанию услуги..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                />
+              </div>
+
+              <div className="sort-box">
+                <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Сортировка:</label>
+                <select value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
+                  <option value="popular">По умолчанию</option>
+                  <option value="price-asc">По возрастанию цены</option>
+                  <option value="price-desc">По убыванию цены</option>
+                  <option value="discount">По размеру скидки</option>
+                  <option value="duration">По длительности (быстрые)</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Results Count & Active Filters Bar */}
+            <div className="catalog-results-bar">
+              <span className="results-count">Найдено услуг: <strong>{filteredServices.length}</strong></span>
+              {(selectedCategoryIds.length > 0 || onlyDiscounted || searchQuery) && (
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => {
+                    setSelectedCategoryIds([]);
+                    setOnlyDiscounted(false);
+                    setSearchQuery('');
+                    setMaxPrice(10000);
+                  }}
+                >
+                  Сбросить фильтры
+                </button>
+              )}
+            </div>
+
+            {/* Services Grid */}
+            {filteredServices.length === 0 ? (
+              <div className="catalog-empty-state">
+                <p style={{ color: 'var(--text-muted)', marginBottom: '1rem', fontSize: '1rem' }}>
+                  По заданным параметрам ничего не найдено.
                 </p>
                 <button
                   type="button"
-                  className="btn btn-primary"
-                  onClick={() => setQuickBookService(null)}
+                  className="btn btn-secondary"
+                  onClick={() => {
+                    setSelectedCategoryIds([]);
+                    setOnlyDiscounted(false);
+                    setSearchQuery('');
+                    setMaxPrice(10000);
+                  }}
                 >
-                  Готово
+                  Сбросить фильтры
                 </button>
               </div>
             ) : (
-              <form onSubmit={handleQuickBookSubmit}>
-                <div style={{ marginBottom: '1rem' }}>
-                  <div style={{ fontWeight: '600', color: 'var(--text-main)' }}>{quickBookService.title}</div>
-                  <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
-                    Длительность: {quickBookService.duration} мин. | Стоимость: {quickBookService.price} ₽
-                  </div>
-                </div>
+              <div className="services-grid">
+                {filteredServices.map((service) => {
+                  const servDisc = getServiceDiscount(service);
+                  const { finalPrice, effectivePct, hasDiscount } = calculateFinalPrice(
+                    service.price,
+                    servDisc,
+                    userDiscount
+                  );
+                  const serviceCats = getServiceCategories(service);
+                  const inCartQty = getItemCartQty(service.id_service);
 
-                <div className="form-group">
-                  <label className="form-label">Мастер</label>
-                  <select
-                    value={selectedMasterId}
-                    onChange={(e) => setSelectedMasterId(e.target.value)}
-                  >
-                    {masters.map((m) => (
-                      <option key={m.id_user} value={m.id_user}>
-                        {m.first_name} {m.second_name || ''} ({m.email})
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                  return (
+                    <div key={service.id_service} className="service-card">
+                      <div className="service-card-media">
+                        {service.image_url ? (
+                          <img
+                            src={service.image_url}
+                            alt={service.title}
+                            className="service-card-img"
+                            onError={(e) => {
+                              e.target.style.display = 'none';
+                              if (e.target.nextSibling) {
+                                e.target.nextSibling.style.display = 'flex';
+                              }
+                            }}
+                          />
+                        ) : null}
+                        <div
+                          className="service-card-placeholder"
+                          style={{ display: service.image_url ? 'none' : 'flex' }}
+                        >
+                          <span>{serviceCats[0]?.title || 'УСЛУГА'}</span>
+                        </div>
 
-                <div className="form-group">
-                  <label className="form-label">Дата визита</label>
-                  <input
-                    type="date"
-                    min={new Date().toISOString().split('T')[0]}
-                    value={selectedDate}
-                    onChange={(e) => setSelectedDate(e.target.value)}
-                    required
-                  />
-                </div>
+                        {hasDiscount && (
+                          <div className="service-card-discount-badge">
+                            -{effectivePct}%
+                          </div>
+                        )}
+                      </div>
 
-                <div className="form-group">
-                  <label className="form-label">Время</label>
-                  <div className="slots-grid">
-                    {timeSlots.map((slot) => (
-                      <button
-                        key={slot}
-                        type="button"
-                        className={`slot-pill ${selectedSlot === slot ? 'selected' : ''}`}
-                        onClick={() => setSelectedSlot(slot)}
-                      >
-                        {slot}
-                      </button>
-                    ))}
-                  </div>
-                </div>
+                      <div className="service-card-body">
+                        <div className="service-card-categories">
+                          {serviceCats.map((c) => (
+                            <span key={c.id_category} className="category-pill">{c.title}</span>
+                          ))}
+                        </div>
 
-                <button
-                  type="submit"
-                  className="btn btn-primary"
-                  style={{ width: '100%', marginTop: '1rem' }}
-                  disabled={quickBookSubmitting}
-                >
-                  {quickBookSubmitting ? 'Оформление...' : 'Подтвердить запись'}
-                </button>
-              </form>
+                        <h3 className="service-card-title">{service.title}</h3>
+                        <p className="service-card-desc">{service.description || 'Профессиональная услуга в салоне.'}</p>
+
+                        <div className="service-card-meta">
+                          <div>
+                            <span className="service-price">{finalPrice.toLocaleString()} ₽</span>
+                            {hasDiscount && (
+                              <span className="service-old-price">
+                                {parseFloat(service.price).toLocaleString()} ₽
+                              </span>
+                            )}
+                          </div>
+                          <span className="service-duration">{service.duration || 30} мин.</span>
+                        </div>
+
+                        <div className="service-card-actions">
+                          <button
+                            type="button"
+                            className={`btn ${inCartQty > 0 ? 'btn-primary' : 'btn-secondary'} btn-sm`}
+                            style={{ width: '100%' }}
+                            onClick={() => handleAddToCart(service)}
+                          >
+                            {inCartQty > 0 ? `В корзине (${inCartQty}) +` : 'Добавить в корзину'}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             )}
-          </div>
+          </main>
         </div>
       )}
     </div>

@@ -62,7 +62,7 @@ function Menu() {
                   {user.role_title || (user.role_id === 1 ? 'Администратор' : 'Клиент')}
                 </span>
                 {user.discount_percentage > 0 && (
-                  <span className="badge badge-warning" style={{ fontSize: '0.65rem', padding: '0.15rem 0.4rem' }}>
+                  <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
                     Купон {user.discount_percentage}%
                   </span>
                 )}

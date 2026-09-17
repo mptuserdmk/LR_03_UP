@@ -115,7 +115,7 @@ export default function AdminDiscountManager() {
       const created = await createCategory({ title: newCatTitle.trim() });
       setCategories(prev => [...prev, created]);
       setNewCatTitle('');
-      setSuccessMsg(`Категория «${created.title}» добавлена и сразу видна в каталоге (aside)!`);
+      setSuccessMsg(`Категория «${created.title}» добавлена и сразу видна в каталоге`);
       setTimeout(() => setSuccessMsg(''), 4000);
     } catch (err) {
       setError(err.message);
@@ -163,7 +163,7 @@ export default function AdminDiscountManager() {
         discount_id: 1,
         image_url: '',
       });
-      setSuccessMsg(`Услуга «${created.title}» успешно добавлена в каталог!`);
+      setSuccessMsg(`Услуга «${created.title}» успешно добавлена в каталог`);
       setTimeout(() => setSuccessMsg(''), 4000);
     } catch (err) {
       setError(err.message || 'Ошибка добавления услуги');
@@ -205,7 +205,7 @@ export default function AdminDiscountManager() {
       </div>
 
       {successMsg && (
-        <div style={{ background: 'rgba(16, 185, 129, 0.1)', border: '1px solid var(--accent-success)', color: 'var(--accent-success)', padding: '0.75rem 1rem', borderRadius: '4px', marginBottom: '1.5rem' }}>
+        <div style={{ background: 'var(--bg-surface-elevated)', border: '1px solid var(--border-strong)', color: 'var(--text-main)', padding: '0.75rem 1rem', borderRadius: '4px', marginBottom: '1.5rem' }}>
           {successMsg}
         </div>
       )}
@@ -223,7 +223,7 @@ export default function AdminDiscountManager() {
           className={`admin-nav-tab ${activeTab === 'services' ? 'active' : ''}`}
           onClick={() => setActiveTab('services')}
         >
-          Услуги и добавление ({services.length})
+          Услуги ({services.length})
         </button>
         <button
           type="button"
@@ -364,7 +364,6 @@ export default function AdminDiscountManager() {
                 <table className="admin-table">
                   <thead>
                     <tr>
-                      <th>ID</th>
                       <th>Название услуги</th>
                       <th>Длительность</th>
                       <th>Базовая цена</th>
@@ -381,7 +380,6 @@ export default function AdminDiscountManager() {
 
                       return (
                         <tr key={s.id_service}>
-                          <td className="row-number-cell">{s.id_service}</td>
                           <td>
                             <div style={{ fontWeight: '600' }}>{s.title}</div>
                             <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{s.description || '—'}</div>
@@ -402,10 +400,8 @@ export default function AdminDiscountManager() {
                             </select>
                           </td>
                           <td>
-                            <strong style={{ color: pct > 0 ? 'var(--accent-warning)' : 'var(--text-main)' }}>
-                              {finalPrice.toLocaleString()} ₽
-                            </strong>
-                            {pct > 0 && <span className="badge badge-warning" style={{ marginLeft: '0.5rem' }}>-{pct}%</span>}
+                            <strong>{finalPrice.toLocaleString()} ₽</strong>
+                            {pct > 0 && <span style={{ marginLeft: '0.5rem', color: 'var(--text-muted)', fontSize: '0.8rem' }}>(-{pct}%)</span>}
                           </td>
                           <td>
                             <button
@@ -431,7 +427,6 @@ export default function AdminDiscountManager() {
               <table className="admin-table">
                 <thead>
                   <tr>
-                    <th>ID</th>
                     <th>Пользователь</th>
                     <th>Email / Телефон</th>
                     <th>Роль</th>
@@ -441,7 +436,6 @@ export default function AdminDiscountManager() {
                 <tbody>
                   {users.map((u) => (
                     <tr key={u.id_user}>
-                      <td className="row-number-cell">{u.id_user}</td>
                       <td>
                         <strong>{u.second_name} {u.first_name} {u.middle_name || ''}</strong>
                       </td>
@@ -450,7 +444,7 @@ export default function AdminDiscountManager() {
                         <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{u.phone || '—'}</div>
                       </td>
                       <td>
-                        <span className={`badge ${u.role_id === 1 ? 'badge-primary' : 'badge-secondary'}`}>
+                        <span style={{ color: 'var(--text-muted)' }}>
                           {u.role_title || (u.role_id === 1 ? 'Администратор' : 'Клиент')}
                         </span>
                       </td>
@@ -497,7 +491,6 @@ export default function AdminDiscountManager() {
                 <table className="admin-table">
                   <thead>
                     <tr>
-                      <th>ID</th>
                       <th>Название категории</th>
                       <th>Действия</th>
                     </tr>
@@ -505,7 +498,6 @@ export default function AdminDiscountManager() {
                   <tbody>
                     {categories.map((c) => (
                       <tr key={c.id_category}>
-                        <td className="row-number-cell">{c.id_category}</td>
                         <td><strong>{c.title}</strong></td>
                         <td>
                           <button
@@ -530,7 +522,6 @@ export default function AdminDiscountManager() {
               <table className="admin-table">
                 <thead>
                   <tr>
-                    <th>№ Заказа</th>
                     <th>Клиент</th>
                     <th>Дата и время</th>
                     <th>Адрес доставки / визита</th>
@@ -541,7 +532,7 @@ export default function AdminDiscountManager() {
                 <tbody>
                   {appointments.length === 0 ? (
                     <tr>
-                      <td colSpan="6" style={{ textAlign: 'center', color: 'var(--text-muted)' }}>Заказов пока нет</td>
+                      <td colSpan="5" style={{ textAlign: 'center', color: 'var(--text-muted)' }}>Заказов пока нет</td>
                     </tr>
                   ) : (
                     appointments.map((a) => {
@@ -549,7 +540,6 @@ export default function AdminDiscountManager() {
                       const dateStr = a.appointment_date ? new Date(a.appointment_date).toLocaleString('ru-RU') : '—';
                       return (
                         <tr key={a.id_appointment}>
-                          <td className="row-number-cell">{a.id_appointment}</td>
                           <td>
                             <div>{a.first_name} {a.second_name}</div>
                             <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{a.user_email || a.email}</div>
@@ -559,8 +549,8 @@ export default function AdminDiscountManager() {
                           <td>
                             <strong>{payment ? `${parseFloat(payment.total).toLocaleString()} ₽` : '—'}</strong>
                           </td>
-                          <td>
-                            <span className="badge badge-success">Оплачен</span>
+                          <td style={{ color: 'var(--text-muted)' }}>
+                            Оплачен
                           </td>
                         </tr>
                       );
