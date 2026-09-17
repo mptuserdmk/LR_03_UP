@@ -7,20 +7,22 @@ const dbConfig = {
   port: 5432,
 };
 
+const targetDb = process.env.PG_DATABASE || 'salon_db2';
+
 async function initDB() {
   const rootClient = new Client({ ...dbConfig, database: 'postgres' });
   await rootClient.connect();
 
-  const checkDb = await rootClient.query("SELECT 1 FROM pg_database WHERE datname = 'salon_db'");
+  const checkDb = await rootClient.query("SELECT 1 FROM pg_database WHERE datname = $1", [targetDb]);
   if (checkDb.rowCount === 0) {
-    console.log('Creating database salon_db...');
-    await rootClient.query('CREATE DATABASE salon_db');
+    console.log(`Creating database ${targetDb}...`);
+    await rootClient.query(`CREATE DATABASE ${targetDb}`);
   } else {
-    console.log('Database salon_db already exists.');
+    console.log(`Database ${targetDb} already exists.`);
   }
   await rootClient.end();
 
-  const pool = new Pool({ ...dbConfig, database: 'salon_db' });
+  const pool = new Pool({ ...dbConfig, database: targetDb });
 
   console.log('Creating/updating tables...');
   await pool.query(`
